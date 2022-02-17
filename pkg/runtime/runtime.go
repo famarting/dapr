@@ -365,7 +365,7 @@ func (a *DaprRuntime) initRuntime(opts *runtimeOpts) error {
 		log.Warnf("failed to watch component updates: %s", err)
 	}
 	a.appendBuiltinSecretStore()
-	err = a.loadComponents(opts)
+	err = a.loadComponents()
 	if err != nil {
 		log.Warnf("failed to load components: %s", err)
 	}
@@ -541,7 +541,6 @@ func (a *DaprRuntime) beginPubSub(name string, ps pubsub.PubSub) error {
 
 		log.Debugf("subscribing to topic=%s on pubsub=%s", topic, name)
 
-		routeMetadata := route.metadata
 		if err := ps.Subscribe(pubsub.SubscribeRequest{
 			Topic:    topic,
 			Metadata: route.metadata,
@@ -552,27 +551,12 @@ func (a *DaprRuntime) beginPubSub(name string, ps pubsub.PubSub) error {
 
 			msg.Metadata[pubsubName] = name
 
-			rawPayload, err := contrib_metadata.IsRawPayload(routeMetadata)
-			if err != nil {
-				log.Errorf("error deserializing pubsub metadata: %s", err)
-				return err
-			}
-
 			var cloudEvent map[string]interface{}
-			data := msg.Data
-			if rawPayload {
-				cloudEvent = pubsub.FromRawPayload(msg.Data, msg.Topic, name)
-				data, err = a.json.Marshal(cloudEvent)
-				if err != nil {
-					log.Errorf("error serializing cloud event in pubsub %s and topic %s: %s", name, msg.Topic, err)
-					return err
-				}
-			} else {
-				err = a.json.Unmarshal(msg.Data, &cloudEvent)
-				if err != nil {
-					log.Errorf("error deserializing cloud event in pubsub %s and topic %s: %s", name, msg.Topic, err)
-					return err
-				}
+			var data []byte
+
+			cloudEvent, data, err = a.readCloudEventAndData(name, route, msg)
+			if err != nil {
+				return err
 			}
 
 			if pubsub.HasExpired(cloudEvent) {
@@ -605,6 +589,64 @@ func (a *DaprRuntime) beginPubSub(name string, ps pubsub.PubSub) error {
 	}
 
 	return nil
+}
+
+func (a *DaprRuntime) readCloudEventAndData(name string, route Route, msg *pubsub.NewMessage) (map[string]interface{}, []byte, error) {
+
+	var cloudEvent map[string]interface{}
+	var data []byte
+
+	routeRawPayload, err := contrib_metadata.IsRawPayload(route.metadata)
+	if err != nil {
+		log.Errorf("error deserializing pubsub metadata: %s", err)
+		return nil, nil, err
+	}
+	if routeRawPayload {
+		cloudEvent = pubsub.FromRawPayload(msg.Data, msg.Topic, name)
+		data, err = a.json.Marshal(cloudEvent)
+		if err != nil {
+			log.Errorf("error serializing cloud event in pubsub %s and topic %s: %s", name, msg.Topic, err)
+			return nil, nil, err
+		}
+	} else {
+
+		messageRawPayload, metaErr := contrib_metadata.IsRawPayload(msg.Metadata)
+		if metaErr != nil {
+			log.Errorf("error deserializing message metadata: %s", err)
+			return nil, nil, err
+		}
+
+		if messageRawPayload {
+			//message is rawPayload from source where it was published by user code
+			//generate cloudevent
+			cloudEvent = pubsub.FromRawPayload(msg.Data, msg.Topic, name)
+			//raw user provided data
+			data = msg.Data
+		} else {
+			err = a.json.Unmarshal(msg.Data, &cloudEvent)
+			if err != nil {
+				log.Errorf("error deserializing cloud event in pubsub %s and topic %s: %s", name, msg.Topic, err)
+				return nil, nil, err
+			}
+
+			routeBinaryCloudEvent, err := runtime_pubsub.IsBinaryCloudEvent(route.metadata)
+			if err != nil {
+				log.Errorf("error deserializing pubsub metadata: %s", err)
+				return nil, nil, err
+			}
+
+			if routeBinaryCloudEvent {
+				data, err = a.readCloudEventData(cloudEvent)
+				if err != nil {
+					log.Errorf("error reading pubsub cloudevent data: %s", err)
+					return nil, nil, err
+				}
+			} else {
+				data = msg.Data
+			}
+		}
+	}
+	return cloudEvent, data, nil
 }
 
 // findMatchingRoute selects the path based on routing rules. If there are
@@ -1358,7 +1400,7 @@ func (a *DaprRuntime) Publish(req *pubsub.PublishRequest) error {
 		return runtime_pubsub.NotAllowedError{Topic: req.Topic, ID: a.runtimeConfig.ID}
 	}
 
-	return a.pubSubs[req.PubsubName].Publish(req)
+	return thepubsub.Publish(req)
 }
 
 // GetPubSub is an adapter method to find a pubsub by name.
@@ -1535,35 +1577,12 @@ func (a *DaprRuntime) publishMessageGRPC(ctx context.Context, msg *pubsubSubscri
 		Path:            msg.path,
 	}
 
-	if data, ok := cloudEvent[pubsub.DataBase64Field]; ok && data != nil {
-		if dataAsString, ok := data.(string); ok {
-			decoded, decodeErr := base64.StdEncoding.DecodeString(dataAsString)
-			if decodeErr != nil {
-				log.Debugf("unable to base64 decode cloudEvent field data_base64: %s", decodeErr)
-
-				return decodeErr
-			}
-
-			envelope.Data = decoded
-		} else {
-			return ErrUnexpectedEnvelopeData
-		}
-	} else if data, ok := cloudEvent[pubsub.DataField]; ok && data != nil {
-		envelope.Data = nil
-
-		if contenttype.IsStringContentType(envelope.DataContentType) {
-			switch v := data.(type) {
-			case string:
-				envelope.Data = []byte(v)
-			case []byte:
-				envelope.Data = v
-			default:
-				return ErrUnexpectedEnvelopeData
-			}
-		} else if contenttype.IsJSONContentType(envelope.DataContentType) {
-			envelope.Data, _ = a.json.Marshal(data)
-		}
+	data, err := a.readCloudEventData(cloudEvent)
+	if err != nil {
+		log.Errorf("error reading pubsub cloudevent data: %s", err)
+		return err
 	}
+	envelope.Data = data
 
 	var span *trace.Span
 	if iTraceID, ok := cloudEvent[pubsub.TraceIDField]; ok {
@@ -1625,6 +1644,31 @@ func (a *DaprRuntime) publishMessageGRPC(ctx context.Context, msg *pubsubSubscri
 	return errors.Errorf("unknown status returned from app while processing pub/sub event %v: %v", cloudEvent[pubsub.IDField], res.GetStatus())
 }
 
+func (a *DaprRuntime) readCloudEventData(cloudEvent map[string]interface{}) ([]byte, error) {
+	if data, ok := cloudEvent[pubsub.DataBase64Field]; ok && data != nil {
+		if dataAsString, ok := data.(string); ok {
+			decoded, decodeErr := base64.StdEncoding.DecodeString(dataAsString)
+			if decodeErr != nil {
+				log.Debugf("unable to base64 decode cloudEvent field data_base64: %s", decodeErr)
+				return nil, decodeErr
+			}
+			return decoded, nil
+		} else {
+			return nil, ErrUnexpectedEnvelopeData
+		}
+	} else if data, ok := cloudEvent[pubsub.DataField]; ok && data != nil {
+		switch v := data.(type) {
+		case string:
+			return []byte(v), nil
+		case []byte:
+			return v, nil
+		default:
+			return nil, ErrUnexpectedEnvelopeData
+		}
+	}
+	return nil, errors.New("unable to read data from cloudevent")
+}
+
 func extractCloudEventProperty(cloudEvent map[string]interface{}, property string) string {
 	if cloudEvent == nil {
 		return ""
@@ -1684,7 +1728,7 @@ func (a *DaprRuntime) isComponentAuthorized(component components_v1alpha1.Compon
 	return false
 }
 
-func (a *DaprRuntime) loadComponents(opts *runtimeOpts) error {
+func (a *DaprRuntime) loadComponents() error {
 	var loader components.ComponentLoader
 
 	switch a.runtimeConfig.Mode {
