@@ -177,7 +177,7 @@ func (s *Subscriber) ReloadDeclaredAppSubscription(name, pubsubName string) erro
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	if s.closed {
+	if !s.appSubActive || s.closed {
 		return nil
 	}
 
@@ -296,6 +296,7 @@ func (s *Subscriber) StopAllSubscriptionsForever() {
 	defer s.lock.Unlock()
 
 	s.closed = true
+	s.appSubActive = false
 
 	for _, psubs := range s.appSubs {
 		for _, sub := range psubs {
