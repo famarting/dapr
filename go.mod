@@ -2,6 +2,8 @@ module github.com/dapr/dapr
 
 go 1.24.4
 
+replace github.com/dapr/durabletask-go => ../dapr-durabletask-go
+
 require (
 	contrib.go.opencensus.io/exporter/prometheus v0.4.2
 	github.com/PaesslerAG/jsonpath v0.1.1

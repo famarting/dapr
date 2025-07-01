@@ -32,6 +32,7 @@ import (
 	"github.com/dapr/dapr/pkg/actors"
 	actorerrors "github.com/dapr/dapr/pkg/actors/errors"
 	"github.com/dapr/dapr/pkg/actors/table"
+	"github.com/dapr/dapr/pkg/actors/targets/executor"
 	"github.com/dapr/dapr/pkg/actors/targets/workflow"
 	"github.com/dapr/dapr/pkg/actors/targets/workflow/activity"
 	"github.com/dapr/dapr/pkg/actors/targets/workflow/orchestrator"
@@ -43,6 +44,7 @@ import (
 	"github.com/dapr/dapr/pkg/runtime/wfengine/todo"
 	"github.com/dapr/dapr/utils"
 	"github.com/dapr/durabletask-go/api"
+	"github.com/dapr/durabletask-go/api/protos"
 	"github.com/dapr/durabletask-go/backend"
 	"github.com/dapr/durabletask-go/backend/runtimestate"
 	"github.com/dapr/kit/concurrency"
@@ -50,12 +52,15 @@ import (
 	"github.com/dapr/kit/ptr"
 )
 
+var _ backend.Backend = &Actors{}
+
 var log = logger.NewLogger("dapr.wfengine.backend.actors")
 
 const (
 	defaultNamespace     = "default"
 	WorkflowNameLabelKey = "workflow"
 	ActivityNameLabelKey = "activity"
+	ExecutorNameLabelKey = "executor"
 	ActorTypePrefix      = "dapr.internal."
 )
 
@@ -72,6 +77,7 @@ type Actors struct {
 	appID             string
 	workflowActorType string
 	activityActorType string
+	executorActorType string
 
 	defaultReminderInterval *time.Duration
 	resiliency              resiliency.Provider
@@ -88,6 +94,7 @@ func New(opts Options) *Actors {
 		appID:                     opts.AppID,
 		workflowActorType:         ActorTypePrefix + opts.Namespace + utils.DotDelimiter + opts.AppID + utils.DotDelimiter + WorkflowNameLabelKey,
 		activityActorType:         ActorTypePrefix + opts.Namespace + utils.DotDelimiter + opts.AppID + utils.DotDelimiter + ActivityNameLabelKey,
+		executorActorType:         ActorTypePrefix + opts.Namespace + utils.DotDelimiter + opts.AppID + utils.DotDelimiter + ExecutorNameLabelKey,
 		actors:                    opts.Actors,
 		resiliency:                opts.Resiliency,
 		schedulerReminders:        opts.SchedulerReminders,
@@ -153,6 +160,11 @@ func (abe *Actors) RegisterActors(ctx context.Context) error {
 		return err
 	}
 
+	executorFactory := executor.Factory(executor.Options{
+		ActorType: abe.executorActorType,
+		Table:     atable,
+	})
+
 	atable.RegisterActorTypes(
 		table.RegisterActorTypeOptions{
 			Factories: []table.ActorTypeFactory{
@@ -163,6 +175,10 @@ func (abe *Actors) RegisterActors(ctx context.Context) error {
 				{
 					Factory: activityFactory,
 					Type:    abe.activityActorType,
+				},
+				{
+					Factory: executorFactory,
+					Type:    abe.executorActorType,
 				},
 			},
 		},
@@ -177,7 +193,7 @@ func (abe *Actors) UnRegisterActors(ctx context.Context) error {
 		return err
 	}
 
-	return table.UnRegisterActorTypes(abe.workflowActorType, abe.activityActorType)
+	return table.UnRegisterActorTypes(abe.workflowActorType, abe.activityActorType, abe.executorActorType)
 }
 
 // RerunWorkflowFromEvent implements backend.Backend and reruns a workflow from
@@ -387,6 +403,190 @@ func (*Actors) CompleteOrchestrationWorkItem(ctx context.Context, wi *backend.Or
 	// Sending true signals the waiting workflow actor to complete the execution normally.
 	wi.Properties[todo.CallbackChannelProperty].(chan bool) <- true
 	return nil
+}
+
+func (a *Actors) CompleteOrchestratorTask(ctx context.Context, resp *protos.OrchestratorResponse) error {
+	router, err := a.actors.Router(ctx)
+	if err != nil {
+		return err
+	}
+
+	data, err := proto.Marshal(resp)
+	if err != nil {
+		return err
+	}
+
+	req := internalsv1pb.
+		NewInternalInvokeRequest(executor.MethodComplete).
+		WithActor(a.executorActorType, resp.GetInstanceId()).
+		WithData(data).
+		WithContentType(invokev1.ProtobufContentType)
+
+	_, err = router.Call(ctx, req)
+	return err
+}
+
+func (a *Actors) CancelOrchestratorTask(ctx context.Context, id api.InstanceID) error {
+	router, err := a.actors.Router(ctx)
+	if err != nil {
+		return err
+	}
+
+	req := internalsv1pb.
+		NewInternalInvokeRequest(executor.MethodCancel).
+		WithActor(a.executorActorType, string(id)).
+		WithContentType(invokev1.ProtobufContentType)
+
+	_, err = router.Call(ctx, req)
+	return err
+}
+
+func (a *Actors) WaitForOrchestratorCompletion(ctx context.Context, req *protos.OrchestratorRequest) (*protos.OrchestratorResponse, error) {
+	router, err := a.actors.Router(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	sreq := internalsv1pb.
+		NewInternalInvokeRequest(executor.MethodWatchComplete).
+		WithActor(a.executorActorType, req.GetInstanceId()).
+		WithContentType(invokev1.ProtobufContentType)
+
+	var ch chan *internalsv1pb.InternalInvokeResponse
+	for {
+		ch = make(chan *internalsv1pb.InternalInvokeResponse, 1)
+		err = router.CallStream(ctx, sreq, ch)
+		if err == nil {
+			break
+		}
+		if ctx.Err() != nil {
+			return nil, err
+		}
+		log.Errorf("Failed to wait for orchestrator completion: %s", err)
+		select {
+		case <-time.After(time.Second / 2):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	var res *internalsv1pb.InternalInvokeResponse
+	select {
+	case res = <-ch:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
+	if res == nil {
+		return nil, errors.New("received nil response from orchestrator completion")
+	}
+	if res.GetStatus().GetCode() == int32(codes.Aborted) {
+		return nil, api.ErrTaskCancelled
+	}
+	var resp protos.OrchestratorResponse
+	if err = proto.Unmarshal(res.GetMessage().GetData().GetValue(), &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (a *Actors) CompleteActivityTask(ctx context.Context, resp *protos.ActivityResponse) error {
+	router, err := a.actors.Router(ctx)
+	if err != nil {
+		return err
+	}
+
+	key := backend.GetActivityExecutionKey(
+		resp.GetInstanceId(),
+		resp.GetTaskId(),
+	)
+
+	data, err := proto.Marshal(resp)
+	if err != nil {
+		return err
+	}
+
+	req := internalsv1pb.
+		NewInternalInvokeRequest(executor.MethodComplete).
+		WithActor(a.executorActorType, key).
+		WithData(data).
+		WithContentType(invokev1.ProtobufContentType)
+
+	_, err = router.Call(ctx, req)
+	return err
+}
+
+func (a *Actors) CancelActivityTask(ctx context.Context, id api.InstanceID, taskID int32) error {
+	router, err := a.actors.Router(ctx)
+	if err != nil {
+		return err
+	}
+
+	key := backend.GetActivityExecutionKey(
+		string(id),
+		taskID,
+	)
+
+	req := internalsv1pb.
+		NewInternalInvokeRequest(executor.MethodCancel).
+		WithActor(a.executorActorType, key).
+		WithContentType(invokev1.ProtobufContentType)
+
+	_, err = router.Call(ctx, req)
+	return err
+}
+
+func (a *Actors) WaitForActivityCompletion(ctx context.Context, req *protos.ActivityRequest) (*protos.ActivityResponse, error) {
+	router, err := a.actors.Router(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	key := backend.GetActivityExecutionKey(
+		req.GetOrchestrationInstance().GetInstanceId(),
+		req.GetTaskId(),
+	)
+	sreq := internalsv1pb.
+		NewInternalInvokeRequest(executor.MethodWatchComplete).
+		WithActor(a.executorActorType, key).
+		WithContentType(invokev1.ProtobufContentType)
+
+	var ch chan *internalsv1pb.InternalInvokeResponse
+	for {
+		ch = make(chan *internalsv1pb.InternalInvokeResponse, 1)
+		err = router.CallStream(ctx, sreq, ch)
+		if err == nil {
+			break
+		}
+		if ctx.Err() != nil {
+			return nil, err
+		}
+		log.Errorf("Failed to wait for activity completion: %s", err)
+		select {
+		case <-time.After(time.Second / 2):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	var res *internalsv1pb.InternalInvokeResponse
+	select {
+	case res = <-ch:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
+	if res == nil {
+		return nil, errors.New("received nil response from activity completion")
+	}
+	if res.GetStatus().GetCode() == int32(codes.Aborted) {
+		return nil, api.ErrTaskCancelled
+	}
+	var resp protos.ActivityResponse
+	if err = proto.Unmarshal(res.GetMessage().GetData().GetValue(), &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // CreateTaskHub implements backend.Backend
