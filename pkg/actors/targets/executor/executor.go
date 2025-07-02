@@ -16,8 +16,6 @@ package executor
 import (
 	"context"
 	"errors"
-	"sync/atomic"
-	"time"
 
 	actorapi "github.com/dapr/dapr/pkg/actors/api"
 	"github.com/dapr/dapr/pkg/actors/table"
@@ -48,10 +46,9 @@ type executor struct {
 
 	table table.Interface
 
-	closeCh        chan struct{}
-	completeCh     chan *internalsv1pb.InternalInvokeResponse
-	completeCalled atomic.Bool
-	cancelCh       chan struct{}
+	closeCh    chan struct{}
+	completeCh chan *internalsv1pb.InternalInvokeResponse
+	cancelCh   chan struct{}
 
 	watchLock chan struct{}
 }
@@ -83,11 +80,6 @@ func (e *executor) InvokeMethod(ctx context.Context, req *internalsv1pb.Internal
 }
 
 func (e *executor) complete(ctx context.Context, req *internalsv1pb.InternalInvokeRequest) error {
-	defer e.table.DeleteFromTableIn(e, time.Second*20)
-	if !e.completeCalled.CompareAndSwap(false, true) {
-		return errors.New("complete already called")
-	}
-
 	d := &internalsv1pb.InternalInvokeResponse{
 		Status: &internalsv1pb.Status{
 			Code: int32(codes.OK),
@@ -137,6 +129,8 @@ func (e *executor) InvokeStream(ctx context.Context, req *internalsv1pb.Internal
 }
 
 func (e *executor) watchComplete(ctx context.Context, ch chan<- *internalsv1pb.InternalInvokeResponse) error {
+	defer e.table.DeleteFromTableIn(e, 0)
+
 	select {
 	case e.watchLock <- struct{}{}:
 	case <-e.closeCh:
@@ -147,8 +141,6 @@ func (e *executor) watchComplete(ctx context.Context, ch chan<- *internalsv1pb.I
 	defer func() {
 		<-e.watchLock
 	}()
-
-	defer e.table.DeleteFromTableIn(e, 0)
 
 	select {
 	case <-ctx.Done():
