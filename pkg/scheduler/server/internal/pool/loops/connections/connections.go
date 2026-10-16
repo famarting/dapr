@@ -153,6 +153,7 @@ func (c *connections) handleAdd(ctx context.Context, add *loops.ConnAdd) error {
 
 	if filter := add.Request.GetDeadLetter(); filter != nil {
 		c.streams[streamIDx] = c.addDeadLetter(streamLoop, filter)
+		c.replayDeadLetters(ctx, add.Request.GetNamespace(), filter)
 		return nil
 	}
 

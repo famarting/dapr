@@ -15,6 +15,7 @@ package connections
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 
@@ -24,6 +25,8 @@ import (
 	"github.com/dapr/dapr/pkg/scheduler/server/internal/pool/loops"
 	"github.com/dapr/kit/events/loop"
 )
+
+var errDeadLetterReplayed = errors.New("dead-letter replay released")
 
 // deadLetter is a stream subscribed to the triggers in its namespace which no
 // other stream serves.
@@ -73,6 +76,23 @@ func (c *connections) getDeadLetterLoop(meta *schedulerv1pb.JobMetadata) (loop.I
 	return nil, false
 }
 
+// replayDeadLetters re-offers the jobs this scheduler holds waiting for a
+// target matching the filter. The cron engine does not trigger a waiting job
+// again until a prefix matching it becomes deliverable, so marking the
+// filter's prefixes deliverable and at once undeliverable again releases each
+// waiting job into the trigger path exactly once: it goes to a host if one
+// has connected meanwhile, otherwise to a dead-letter stream, and waits again
+// if that answers undeliverable. The prefixes are never held, so a
+// dead-letter stream never stops a job from waiting for a real host.
+func (c *connections) replayDeadLetters(ctx context.Context, ns string, filter *schedulerv1pb.WatchJobsDeadLetter) {
+	cancel, err := c.cron.DeliverablePrefixes(ctx, deadLetterPrefixes(ns, filter)...)
+	if err != nil {
+		log.Warnf("Failed to replay waiting jobs to dead-letter stream in namespace %s: %s", ns, err)
+		return
+	}
+	cancel(errDeadLetterReplayed)
+}
+
 func deadLetterMatches(filter *schedulerv1pb.WatchJobsDeadLetter, meta *schedulerv1pb.JobMetadata) bool {
 	switch t := meta.GetTarget().GetType().(type) {
 	case *schedulerv1pb.JobTargetMetadata_Job:
@@ -82,6 +102,29 @@ func deadLetterMatches(filter *schedulerv1pb.WatchJobsDeadLetter, meta *schedule
 	default:
 		return false
 	}
+}
+
+// deadLetterPrefixes returns the job key prefixes covering every job the
+// filter can match in the namespace. A pattern with a wildcard is widened to
+// its literal head, so the prefixes may cover jobs the filter does not match.
+func deadLetterPrefixes(ns string, filter *schedulerv1pb.WatchJobsDeadLetter) []string {
+	prefixes := make([]string, 0, len(filter.GetAppIds())+len(filter.GetActorTypes()))
+	for _, pattern := range filter.GetAppIds() {
+		prefixes = append(prefixes, patternPrefix("app||"+ns+"||", pattern))
+	}
+	for _, pattern := range filter.GetActorTypes() {
+		prefixes = append(prefixes, patternPrefix("actorreminder||"+ns+"||", pattern))
+	}
+
+	slices.Sort(prefixes)
+	return slices.Compact(prefixes)
+}
+
+func patternPrefix(base, pattern string) string {
+	if head, _, ok := strings.Cut(pattern, "*"); ok {
+		return base + head
+	}
+	return base + pattern + "||"
 }
 
 func matchAny(patterns []string, s string) bool {

@@ -14,11 +14,14 @@ limitations under the License.
 package connections
 
 import (
+	"context"
 	"testing"
 
 	"github.com/diagridio/go-etcd-cron/api"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	apifake "github.com/diagridio/go-etcd-cron/tests/framework/fake"
 
 	internalsv1pb "github.com/dapr/dapr/pkg/proto/internals/v1"
 	schedulerv1pb "github.com/dapr/dapr/pkg/proto/scheduler/v1"
@@ -196,4 +199,37 @@ func TestDeadLetterRouting(t *testing.T) {
 		assert.Equal(t, api.TriggerResponseResult_UNDELIVERABLE, *res)
 		assert.Empty(t, dl.got)
 	})
+}
+
+func TestDeadLetterPrefixes(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, []string{
+		"actorreminder||ns||dapr.internal.ns.",
+		"actorreminder||ns||myactor||",
+		"app||ns||",
+		"app||ns||app1||",
+	}, deadLetterPrefixes("ns", &schedulerv1pb.WatchJobsDeadLetter{
+		ActorTypes: []string{"dapr.internal.ns.*.workflow", "myactor", "dapr.internal.ns.*.activity"},
+		AppIds:     []string{"app1", "*"},
+	}))
+}
+
+func TestReplayDeadLetters(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+	cron := apifake.New().WithDeliverablePrefixes(func(_ context.Context, prefixes ...string) (context.CancelCauseFunc, error) {
+		calls = append(calls, "deliverable")
+		assert.Equal(t, []string{"actorreminder||ns||dapr.internal.ns."}, prefixes)
+		return func(error) { calls = append(calls, "undeliverable") }, nil
+	})
+
+	c := &connections{cron: cron}
+	c.replayDeadLetters(t.Context(), "ns", &schedulerv1pb.WatchJobsDeadLetter{
+		ActorTypes: []string{"dapr.internal.ns.*.workflow"},
+	})
+
+	// The prefixes are released at once, never held deliverable.
+	assert.Equal(t, []string{"deliverable", "undeliverable"}, calls)
 }
