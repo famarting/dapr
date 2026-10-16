@@ -5,6 +5,7 @@ package dapr.proto.scheduler.v1;
 import "dapr/proto/common/v1/common.proto";
 import "dapr/proto/scheduler/v1/placement.proto";
 import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/dapr/dapr/pkg/proto/scheduler/v1;scheduler";
 
@@ -37,6 +38,14 @@ service Scheduler {
   // placement, and FailedPrecondition when this scheduler is not the
   // placement leader.
   rpc ReportActorTypes(stream ReportActorTypesRequest) returns (stream PlacementOrder) {}
+  // WatchDemand streams, per namespace and app ID, the number of workflow and
+  // activity actor reminders which are waiting on this scheduler because no
+  // connected sidecar hosts their actor type. Used by a controller to start a
+  // workflow app scaled to zero. Each scheduler reports only the jobs it
+  // owns, so a client must watch every host returned by WatchHosts and sum
+  // the counts. When mTLS is enabled, only callers whose identity is listed
+  // in the --demand-watcher-ids scheduler flag are allowed.
+  rpc WatchDemand(WatchDemandRequest) returns (stream WatchDemandResponse) {}
 }
 
 message Job {
@@ -359,4 +368,46 @@ message DeleteByNamePrefixRequest {
 
 message DeleteByNamePrefixResponse {
   // Empty
+}
+
+// WatchDemandRequest is the request to watch the waiting workflow work on a
+// scheduler.
+message WatchDemandRequest {}
+
+// WatchDemandResponse is an update of the waiting workflow work on the
+// scheduler serving the stream.
+message WatchDemandResponse {
+  // snapshot is true when apps holds the complete state, replacing all
+  // earlier state received on the stream. Always set on the first message of
+  // the stream, and again whenever the scheduler dropped its waiting jobs,
+  // for example when its job partition was rebalanced.
+  bool snapshot = 1;
+
+  // apps are the app IDs whose waiting work changed since the previous
+  // message, or every app ID with waiting work when snapshot is true. An app ID
+  // with zero workflow and activity jobs no longer has waiting work.
+  repeated AppDemand apps = 2;
+}
+
+// AppDemand is the waiting workflow work of one app ID on a scheduler.
+message AppDemand {
+  // namespace is the namespace of the app ID.
+  string namespace = 1;
+
+  // app_id is the app ID which hosts the actor types of the waiting jobs, as
+  // named by the workflow actor type. This is not necessarily the app ID
+  // which created the job.
+  string app_id = 2;
+
+  // workflow_jobs is the number of waiting reminders on the app ID's
+  // workflow actor type.
+  uint32 workflow_jobs = 3;
+
+  // activity_jobs is the number of waiting reminders on the app ID's
+  // activity actor type.
+  uint32 activity_jobs = 4;
+
+  // oldest_waiting is when the oldest of these jobs started waiting on this
+  // scheduler. Unset when there are no waiting jobs.
+  google.protobuf.Timestamp oldest_waiting = 5;
 }

@@ -157,6 +157,20 @@ func (w *wrapper) ReportActorTypes(ctx context.Context, opts ...grpc.CallOption)
 	return resp, err
 }
 
+func (w *wrapper) WatchDemand(ctx context.Context, req *v1pb.WatchDemandRequest, opts ...grpc.CallOption) (v1pb.Scheduler_WatchDemandClient, error) {
+	var resp v1pb.Scheduler_WatchDemandClient
+
+	err := w.call(ctx, func(client v1pb.SchedulerClient) error {
+		var err error
+
+		resp, err = client.WatchDemand(ctx, req, opts...)
+
+		return err
+	})
+
+	return resp, err
+}
+
 func (w *wrapper) DeleteByNamePrefix(ctx context.Context, req *v1pb.DeleteByNamePrefixRequest, opts ...grpc.CallOption) (*v1pb.DeleteByNamePrefixResponse, error) {
 	var resp *v1pb.DeleteByNamePrefixResponse
 

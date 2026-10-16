@@ -54,6 +54,8 @@ const (
 	// SchedulerReportActorTypesProcedure is the fully-qualified name of the Scheduler's
 	// ReportActorTypes RPC.
 	SchedulerReportActorTypesProcedure = "/dapr.proto.scheduler.v1.Scheduler/ReportActorTypes"
+	// SchedulerWatchDemandProcedure is the fully-qualified name of the Scheduler's WatchDemand RPC.
+	SchedulerWatchDemandProcedure = "/dapr.proto.scheduler.v1.Scheduler/WatchDemand"
 )
 
 // SchedulerClient is a client for the dapr.proto.scheduler.v1.Scheduler service.
@@ -86,6 +88,14 @@ type SchedulerClient interface {
 	// placement, and FailedPrecondition when this scheduler is not the
 	// placement leader.
 	ReportActorTypes(context.Context) *connect.BidiStreamForClient[v1.ReportActorTypesRequest, v1.PlacementOrder]
+	// WatchDemand streams, per namespace and app ID, the number of workflow and
+	// activity actor reminders which are waiting on this scheduler because no
+	// connected sidecar hosts their actor type. Used by a controller to start a
+	// workflow app scaled to zero. Each scheduler reports only the jobs it
+	// owns, so a client must watch every host returned by WatchHosts and sum
+	// the counts. When mTLS is enabled, only callers whose identity is listed
+	// in the --demand-watcher-ids scheduler flag are allowed.
+	WatchDemand(context.Context, *connect.Request[v1.WatchDemandRequest]) (*connect.ServerStreamForClient[v1.WatchDemandResponse], error)
 }
 
 // NewSchedulerClient constructs a client for the dapr.proto.scheduler.v1.Scheduler service. By
@@ -153,6 +163,12 @@ func NewSchedulerClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(schedulerMethods.ByName("ReportActorTypes")),
 			connect.WithClientOptions(opts...),
 		),
+		watchDemand: connect.NewClient[v1.WatchDemandRequest, v1.WatchDemandResponse](
+			httpClient,
+			baseURL+SchedulerWatchDemandProcedure,
+			connect.WithSchema(schedulerMethods.ByName("WatchDemand")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -167,6 +183,7 @@ type schedulerClient struct {
 	deleteByMetadata   *connect.Client[v1.DeleteByMetadataRequest, v1.DeleteByMetadataResponse]
 	deleteByNamePrefix *connect.Client[v1.DeleteByNamePrefixRequest, v1.DeleteByNamePrefixResponse]
 	reportActorTypes   *connect.Client[v1.ReportActorTypesRequest, v1.PlacementOrder]
+	watchDemand        *connect.Client[v1.WatchDemandRequest, v1.WatchDemandResponse]
 }
 
 // ScheduleJob calls dapr.proto.scheduler.v1.Scheduler.ScheduleJob.
@@ -214,6 +231,11 @@ func (c *schedulerClient) ReportActorTypes(ctx context.Context) *connect.BidiStr
 	return c.reportActorTypes.CallBidiStream(ctx)
 }
 
+// WatchDemand calls dapr.proto.scheduler.v1.Scheduler.WatchDemand.
+func (c *schedulerClient) WatchDemand(ctx context.Context, req *connect.Request[v1.WatchDemandRequest]) (*connect.ServerStreamForClient[v1.WatchDemandResponse], error) {
+	return c.watchDemand.CallServerStream(ctx, req)
+}
+
 // SchedulerHandler is an implementation of the dapr.proto.scheduler.v1.Scheduler service.
 type SchedulerHandler interface {
 	// ScheduleJob is used by the daprd sidecar to schedule a job.
@@ -244,6 +266,14 @@ type SchedulerHandler interface {
 	// placement, and FailedPrecondition when this scheduler is not the
 	// placement leader.
 	ReportActorTypes(context.Context, *connect.BidiStream[v1.ReportActorTypesRequest, v1.PlacementOrder]) error
+	// WatchDemand streams, per namespace and app ID, the number of workflow and
+	// activity actor reminders which are waiting on this scheduler because no
+	// connected sidecar hosts their actor type. Used by a controller to start a
+	// workflow app scaled to zero. Each scheduler reports only the jobs it
+	// owns, so a client must watch every host returned by WatchHosts and sum
+	// the counts. When mTLS is enabled, only callers whose identity is listed
+	// in the --demand-watcher-ids scheduler flag are allowed.
+	WatchDemand(context.Context, *connect.Request[v1.WatchDemandRequest], *connect.ServerStream[v1.WatchDemandResponse]) error
 }
 
 // NewSchedulerHandler builds an HTTP handler from the service implementation. It returns the path
@@ -307,6 +337,12 @@ func NewSchedulerHandler(svc SchedulerHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(schedulerMethods.ByName("ReportActorTypes")),
 		connect.WithHandlerOptions(opts...),
 	)
+	schedulerWatchDemandHandler := connect.NewServerStreamHandler(
+		SchedulerWatchDemandProcedure,
+		svc.WatchDemand,
+		connect.WithSchema(schedulerMethods.ByName("WatchDemand")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/dapr.proto.scheduler.v1.Scheduler/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SchedulerScheduleJobProcedure:
@@ -327,6 +363,8 @@ func NewSchedulerHandler(svc SchedulerHandler, opts ...connect.HandlerOption) (s
 			schedulerDeleteByNamePrefixHandler.ServeHTTP(w, r)
 		case SchedulerReportActorTypesProcedure:
 			schedulerReportActorTypesHandler.ServeHTTP(w, r)
+		case SchedulerWatchDemandProcedure:
+			schedulerWatchDemandHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -370,4 +408,8 @@ func (UnimplementedSchedulerHandler) DeleteByNamePrefix(context.Context, *connec
 
 func (UnimplementedSchedulerHandler) ReportActorTypes(context.Context, *connect.BidiStream[v1.ReportActorTypesRequest, v1.PlacementOrder]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("dapr.proto.scheduler.v1.Scheduler.ReportActorTypes is not implemented"))
+}
+
+func (UnimplementedSchedulerHandler) WatchDemand(context.Context, *connect.Request[v1.WatchDemandRequest], *connect.ServerStream[v1.WatchDemandResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("dapr.proto.scheduler.v1.Scheduler.WatchDemand is not implemented"))
 }

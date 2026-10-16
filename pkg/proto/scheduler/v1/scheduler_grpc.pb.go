@@ -28,6 +28,7 @@ const (
 	Scheduler_DeleteByMetadata_FullMethodName   = "/dapr.proto.scheduler.v1.Scheduler/DeleteByMetadata"
 	Scheduler_DeleteByNamePrefix_FullMethodName = "/dapr.proto.scheduler.v1.Scheduler/DeleteByNamePrefix"
 	Scheduler_ReportActorTypes_FullMethodName   = "/dapr.proto.scheduler.v1.Scheduler/ReportActorTypes"
+	Scheduler_WatchDemand_FullMethodName        = "/dapr.proto.scheduler.v1.Scheduler/WatchDemand"
 )
 
 // SchedulerClient is the client API for Scheduler service.
@@ -62,6 +63,14 @@ type SchedulerClient interface {
 	// placement, and FailedPrecondition when this scheduler is not the
 	// placement leader.
 	ReportActorTypes(ctx context.Context, opts ...grpc.CallOption) (Scheduler_ReportActorTypesClient, error)
+	// WatchDemand streams, per namespace and app ID, the number of workflow and
+	// activity actor reminders which are waiting on this scheduler because no
+	// connected sidecar hosts their actor type. Used by a controller to start a
+	// workflow app scaled to zero. Each scheduler reports only the jobs it
+	// owns, so a client must watch every host returned by WatchHosts and sum
+	// the counts. When mTLS is enabled, only callers whose identity is listed
+	// in the --demand-watcher-ids scheduler flag are allowed.
+	WatchDemand(ctx context.Context, in *WatchDemandRequest, opts ...grpc.CallOption) (Scheduler_WatchDemandClient, error)
 }
 
 type schedulerClient struct {
@@ -220,6 +229,38 @@ func (x *schedulerReportActorTypesClient) Recv() (*PlacementOrder, error) {
 	return m, nil
 }
 
+func (c *schedulerClient) WatchDemand(ctx context.Context, in *WatchDemandRequest, opts ...grpc.CallOption) (Scheduler_WatchDemandClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Scheduler_ServiceDesc.Streams[3], Scheduler_WatchDemand_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &schedulerWatchDemandClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Scheduler_WatchDemandClient interface {
+	Recv() (*WatchDemandResponse, error)
+	grpc.ClientStream
+}
+
+type schedulerWatchDemandClient struct {
+	grpc.ClientStream
+}
+
+func (x *schedulerWatchDemandClient) Recv() (*WatchDemandResponse, error) {
+	m := new(WatchDemandResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // SchedulerServer is the server API for Scheduler service.
 // All implementations should embed UnimplementedSchedulerServer
 // for forward compatibility
@@ -252,6 +293,14 @@ type SchedulerServer interface {
 	// placement, and FailedPrecondition when this scheduler is not the
 	// placement leader.
 	ReportActorTypes(Scheduler_ReportActorTypesServer) error
+	// WatchDemand streams, per namespace and app ID, the number of workflow and
+	// activity actor reminders which are waiting on this scheduler because no
+	// connected sidecar hosts their actor type. Used by a controller to start a
+	// workflow app scaled to zero. Each scheduler reports only the jobs it
+	// owns, so a client must watch every host returned by WatchHosts and sum
+	// the counts. When mTLS is enabled, only callers whose identity is listed
+	// in the --demand-watcher-ids scheduler flag are allowed.
+	WatchDemand(*WatchDemandRequest, Scheduler_WatchDemandServer) error
 }
 
 // UnimplementedSchedulerServer should be embedded to have forward compatible implementations.
@@ -284,6 +333,9 @@ func (UnimplementedSchedulerServer) DeleteByNamePrefix(context.Context, *DeleteB
 }
 func (UnimplementedSchedulerServer) ReportActorTypes(Scheduler_ReportActorTypesServer) error {
 	return status.Errorf(codes.Unimplemented, "method ReportActorTypes not implemented")
+}
+func (UnimplementedSchedulerServer) WatchDemand(*WatchDemandRequest, Scheduler_WatchDemandServer) error {
+	return status.Errorf(codes.Unimplemented, "method WatchDemand not implemented")
 }
 
 // UnsafeSchedulerServer may be embedded to opt out of forward compatibility for this service.
@@ -478,6 +530,27 @@ func (x *schedulerReportActorTypesServer) Recv() (*ReportActorTypesRequest, erro
 	return m, nil
 }
 
+func _Scheduler_WatchDemand_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(WatchDemandRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(SchedulerServer).WatchDemand(m, &schedulerWatchDemandServer{stream})
+}
+
+type Scheduler_WatchDemandServer interface {
+	Send(*WatchDemandResponse) error
+	grpc.ServerStream
+}
+
+type schedulerWatchDemandServer struct {
+	grpc.ServerStream
+}
+
+func (x *schedulerWatchDemandServer) Send(m *WatchDemandResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 // Scheduler_ServiceDesc is the grpc.ServiceDesc for Scheduler service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -527,6 +600,11 @@ var Scheduler_ServiceDesc = grpc.ServiceDesc{
 			Handler:       _Scheduler_ReportActorTypes_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
+		},
+		{
+			StreamName:    "WatchDemand",
+			Handler:       _Scheduler_WatchDemand_Handler,
+			ServerStreams: true,
 		},
 	},
 	Metadata: "dapr/proto/scheduler/v1/scheduler.proto",

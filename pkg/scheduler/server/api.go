@@ -235,6 +235,11 @@ func (s *Server) ReportActorTypes(stream schedulerv1pb.Scheduler_ReportActorType
 	return s.placement.ReportActorTypes(stream)
 }
 
+// WatchDemand streams the waiting workflow work of this scheduler.
+func (s *Server) WatchDemand(*schedulerv1pb.WatchDemandRequest, schedulerv1pb.Scheduler_WatchDemandServer) error {
+	return status.Error(codes.Unimplemented, "WatchDemand is not implemented")
+}
+
 // DeleteByMetadata deletes all jobs matching the provided metadata.
 func (s *Server) DeleteByMetadata(ctx context.Context, req *schedulerv1pb.DeleteByMetadataRequest) (*schedulerv1pb.DeleteByMetadataResponse, error) {
 	var isPrefix bool

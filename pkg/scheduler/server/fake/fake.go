@@ -41,6 +41,7 @@ type Fake struct {
 	deleteByMetadataFn   func(ctx context.Context, req *schedulerv1pb.DeleteByMetadataRequest) (*schedulerv1pb.DeleteByMetadataResponse, error)
 	deleteByNamePrefixFn func(ctx context.Context, req *schedulerv1pb.DeleteByNamePrefixRequest) (*schedulerv1pb.DeleteByNamePrefixResponse, error)
 	reportActorTypesFn   func(schedulerv1pb.Scheduler_ReportActorTypesServer) error
+	watchDemandFn        func(*schedulerv1pb.WatchDemandRequest, schedulerv1pb.Scheduler_WatchDemandServer) error
 }
 
 func New(t *testing.T) *Fake {
@@ -76,6 +77,9 @@ func New(t *testing.T) *Fake {
 		},
 		reportActorTypesFn: func(schedulerv1pb.Scheduler_ReportActorTypesServer) error {
 			return status.Error(codes.Unimplemented, "placement is not enabled on this scheduler")
+		},
+		watchDemandFn: func(*schedulerv1pb.WatchDemandRequest, schedulerv1pb.Scheduler_WatchDemandServer) error {
+			return status.Error(codes.Unimplemented, "demand is not served by the fake scheduler")
 		},
 	}
 
@@ -195,4 +199,13 @@ func (f *Fake) WithReportActorTypes(fn func(schedulerv1pb.Scheduler_ReportActorT
 
 func (f *Fake) ReportActorTypes(stream schedulerv1pb.Scheduler_ReportActorTypesServer) error {
 	return f.reportActorTypesFn(stream)
+}
+
+func (f *Fake) WithWatchDemand(fn func(*schedulerv1pb.WatchDemandRequest, schedulerv1pb.Scheduler_WatchDemandServer) error) *Fake {
+	f.watchDemandFn = fn
+	return f
+}
+
+func (f *Fake) WatchDemand(req *schedulerv1pb.WatchDemandRequest, stream schedulerv1pb.Scheduler_WatchDemandServer) error {
+	return f.watchDemandFn(req, stream)
 }
