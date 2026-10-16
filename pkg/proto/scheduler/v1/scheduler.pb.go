@@ -1929,7 +1929,11 @@ type AppDemand struct {
 	Namespace string `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"`
 	// app_id is the app ID which hosts the actor types of the waiting jobs, as
 	// named by the workflow actor type. This is not necessarily the app ID
-	// which created the job.
+	// which created the job. Any app ID in the namespace may create reminders
+	// on another app ID's workflow actor types, for example to start a child
+	// workflow or return an activity result, so any app ID in the namespace can
+	// add demand to another. Consumers that start compute from this signal
+	// should bound how often they do so per app ID.
 	AppId string `protobuf:"bytes,2,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
 	// workflow_jobs is the number of waiting reminders on the app ID's
 	// workflow actor type.
