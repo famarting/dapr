@@ -29,8 +29,10 @@ import (
 	"github.com/dapr/dapr/pkg/healthz"
 	"github.com/dapr/dapr/pkg/modes"
 	schedulerv1pb "github.com/dapr/dapr/pkg/proto/scheduler/v1"
+	"github.com/dapr/dapr/pkg/scheduler/server/internal/authz"
 	"github.com/dapr/dapr/pkg/scheduler/server/internal/controller"
 	"github.com/dapr/dapr/pkg/scheduler/server/internal/cron"
+	"github.com/dapr/dapr/pkg/scheduler/server/internal/demand"
 	"github.com/dapr/dapr/pkg/scheduler/server/internal/etcd"
 	"github.com/dapr/dapr/pkg/scheduler/server/internal/handoff"
 	"github.com/dapr/dapr/pkg/scheduler/server/internal/placement"
@@ -65,6 +67,10 @@ type Options struct {
 	Controller                *controller.Controller
 
 	Workers uint32
+
+	// DemandWatcherIDs are the <namespace>/<app ID> identities allowed to
+	// call WatchDemand when mTLS is enabled.
+	DemandWatcherIDs []string
 
 	Backend       *string
 	BackendConfig any
@@ -103,7 +109,9 @@ type Server struct {
 	port          int
 
 	sec        security.Handler
+	authz      *authz.Authz
 	serializer *serialize.Serializer
+	demand     *demand.Demand
 	cron       cron.Interface
 	etcd       etcd.Interface
 	placement  placement.Interface
@@ -193,6 +201,8 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		CoalesceWindow:     opts.PlacementDisseminateCoalesceWindow,
 	})
 
+	dem := demand.New(demand.Options{})
+
 	cron := cron.New(cron.Options{
 		ID: opts.EtcdName,
 		Host: &schedulerv1pb.Host{
@@ -205,6 +215,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		Workers:       opts.Workers,
 		Placement:     place,
 		Handoff:       hoff,
+		Demand:        dem,
 	})
 
 	if opts.Controller != nil {
@@ -220,6 +231,11 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		placement:     place,
 		etcd:          etcdServer,
 		handoff:       hoff,
+		demand:        dem,
+		authz: authz.New(authz.Options{
+			Security:         opts.Security,
+			DemandWatcherIDs: opts.DemandWatcherIDs,
+		}),
 		serializer: serialize.New(serialize.Options{
 			Security: opts.Security,
 		}),

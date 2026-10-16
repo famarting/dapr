@@ -235,9 +235,30 @@ func (s *Server) ReportActorTypes(stream schedulerv1pb.Scheduler_ReportActorType
 	return s.placement.ReportActorTypes(stream)
 }
 
-// WatchDemand streams the waiting workflow work of this scheduler.
-func (s *Server) WatchDemand(*schedulerv1pb.WatchDemandRequest, schedulerv1pb.Scheduler_WatchDemandServer) error {
-	return status.Error(codes.Unimplemented, "WatchDemand is not implemented")
+// WatchDemand streams the workflow and activity reminders waiting on this
+// scheduler, per app ID.
+func (s *Server) WatchDemand(_ *schedulerv1pb.WatchDemandRequest, stream schedulerv1pb.Scheduler_WatchDemandServer) error {
+	if err := s.authz.WatchDemand(stream.Context()); err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithCancel(stream.Context())
+	defer cancel()
+	go func() {
+		select {
+		case <-s.closeCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	err := s.demand.Watch(ctx, stream.Send)
+	select {
+	case <-s.closeCh:
+		return errors.New("server is closing")
+	default:
+		return err
+	}
 }
 
 // DeleteByMetadata deletes all jobs matching the provided metadata.

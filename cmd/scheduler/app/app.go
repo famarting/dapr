@@ -151,6 +151,8 @@ func Run() {
 
 					Workers: opts.Workers,
 
+					DemandWatcherIDs: opts.DemandWatcherIDs,
+
 					PlacementEnabled:                   opts.PlacementEnabled,
 					PlacementDisseminateTimeout:        opts.PlacementDisseminateTimeout,
 					PlacementDisseminateCoalesceWindow: opts.PlacementDisseminateCoalesceWindow,

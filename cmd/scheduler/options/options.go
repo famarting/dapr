@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/pflag"
@@ -77,6 +78,8 @@ type Options struct {
 	EtcdClientPassword  string
 
 	Workers uint32
+
+	DemandWatcherIDs []string
 
 	IdentityDirectoryWrite string
 
@@ -145,6 +148,8 @@ func New(origArgs []string) (*Options, error) {
 
 	fs.Uint32Var(&opts.Workers, "workers", 2048, "Workers is the number of workers that handle job events. The higher the number the more go routines will be spawned, each working over a partition of the total job space. The higher the number, the higher the number of jobs which can be concurrently delivered to runtimes. Increasing this number increases the number of go routines for this instance. This number should be tuned to the bottleneck of job execution, i.e., CPU, I/O, memory, etc.")
 
+	fs.StringSliceVar(&opts.DemandWatcherIDs, "demand-watcher-ids", nil, "Comma-separated list of <namespace>/<app ID> identities allowed to call WatchDemand, which reports the workflow work waiting for every app ID. Only enforced when mTLS is enabled.")
+
 	if err := fs.MarkHidden("identity-directory-write"); err != nil {
 		log.Fatal(err)
 	}
@@ -194,6 +199,13 @@ func New(origArgs []string) (*Options, error) {
 
 	if !opts.EtcdEmbed && len(opts.EtcdClientEndpoints) == 0 {
 		return nil, errors.New("must specify --etcd-client-endpoints when not using embedded etcd")
+	}
+
+	for _, id := range opts.DemandWatcherIDs {
+		ns, appID, ok := strings.Cut(id, "/")
+		if !ok || ns == "" || appID == "" || strings.Contains(appID, "/") {
+			return nil, fmt.Errorf("invalid --demand-watcher-ids entry %q: must be <namespace>/<app ID>", id)
+		}
 	}
 
 	return &opts, nil

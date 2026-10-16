@@ -19,6 +19,7 @@ import (
 
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -97,14 +98,14 @@ func Test_Metadata(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			a := New(Options{fake.New().WithMTLSEnabled(true)})
+			a := New(Options{Security: fake.New().WithMTLSEnabled(true)})
 			err := a.Metadata(test.ctx, test.meta)
 			assert.Equal(t, test.expCode != nil, err != nil, "%v %v", test.expCode, err)
 			if test.expCode != nil {
 				assert.Equal(t, *test.expCode, status.Code(err))
 			}
 
-			a = New(Options{fake.New().WithMTLSEnabled(false)})
+			a = New(Options{Security: fake.New().WithMTLSEnabled(false)})
 			err = a.Metadata(test.ctx, test.meta)
 			assert.Equal(t, test.nonMTlSCode != nil, err != nil, "%v %v", test.nonMTlSCode, err)
 			if test.nonMTlSCode != nil {
@@ -183,14 +184,14 @@ func Test_Initial(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			a := New(Options{fake.New().WithMTLSEnabled(true)})
+			a := New(Options{Security: fake.New().WithMTLSEnabled(true)})
 			err := a.WatchInitial(test.ctx, test.initial)
 			assert.Equal(t, test.expCode != nil, err != nil, "%v %v", test.expCode, err)
 			if test.expCode != nil {
 				assert.Equal(t, *test.expCode, status.Code(err))
 			}
 
-			a = New(Options{fake.New().WithMTLSEnabled(false)})
+			a = New(Options{Security: fake.New().WithMTLSEnabled(false)})
 			err = a.WatchInitial(test.ctx, test.initial)
 			assert.Equal(t, test.nonMTlSCode != nil, err != nil, "%v %v", test.nonMTlSCode, err)
 			if test.nonMTlSCode != nil {
@@ -308,7 +309,7 @@ func Test_Job(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			for _, mtls := range []bool{true, false} {
-				a := New(Options{fake.New().WithMTLSEnabled(mtls)})
+				a := New(Options{Security: fake.New().WithMTLSEnabled(mtls)})
 				err := a.Job(pki.ClientGRPCCtx(t), test.req)
 				assert.Equal(t, test.expCode != nil, err != nil, "mtls=%t %v %v", mtls, test.expCode, err)
 				if test.expCode != nil {
@@ -319,8 +320,61 @@ func Test_Job(t *testing.T) {
 	}
 
 	t.Run("metadata only requests never get the activity result exemption", func(t *testing.T) {
-		a := New(Options{fake.New().WithMTLSEnabled(true)})
+		a := New(Options{Security: fake.New().WithMTLSEnabled(true)})
 		err := a.Metadata(pki.ClientGRPCCtx(t), actorMeta("dapr.internal.ns1.app2.workflow"))
 		assert.Equal(t, codes.PermissionDenied, status.Code(err))
 	})
+}
+
+func Test_WatchDemand(t *testing.T) {
+	appID := spiffeid.RequireFromString("spiffe://example.org/ns/ns1/app1")
+	serverID := spiffeid.RequireFromString("spiffe://example.org/ns/dapr-system/dapr-scheduler")
+	pki := test.GenPKI(t, test.PKIOptions{LeafID: serverID, ClientID: appID})
+
+	tests := map[string]struct {
+		ctx     context.Context
+		allowed []string
+		expCode *codes.Code
+	}{
+		"no auth context should error": {
+			ctx:     t.Context(),
+			allowed: []string{"ns1/app1"},
+			expCode: ptr.Of(codes.Unauthenticated),
+		},
+		"no allowed identities should error": {
+			ctx:     pki.ClientGRPCCtx(t),
+			expCode: ptr.Of(codes.PermissionDenied),
+		},
+		"identity not allowed should error": {
+			ctx:     pki.ClientGRPCCtx(t),
+			allowed: []string{"ns1/app2", "ns2/app1", "app1", "ns1"},
+			expCode: ptr.Of(codes.PermissionDenied),
+		},
+		"allowed identity should pass": {
+			ctx:     pki.ClientGRPCCtx(t),
+			allowed: []string{"ns2/app2", "ns1/app1"},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			a := New(Options{
+				Security:         fake.New().WithMTLSEnabled(true),
+				DemandWatcherIDs: test.allowed,
+			})
+			err := a.WatchDemand(test.ctx)
+			assert.Equal(t, test.expCode != nil, err != nil, "%v %v", test.expCode, err)
+			if test.expCode != nil {
+				assert.Equal(t, *test.expCode, status.Code(err))
+			}
+
+			// Without mTLS there is no identity to check, so every caller
+			// is allowed.
+			a = New(Options{
+				Security:         fake.New().WithMTLSEnabled(false),
+				DemandWatcherIDs: test.allowed,
+			})
+			require.NoError(t, a.WatchDemand(test.ctx))
+		})
+	}
 }

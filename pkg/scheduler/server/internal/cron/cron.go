@@ -70,6 +70,10 @@ type Options struct {
 
 	// Handoff is this scheduler's own view of the placement handoff facts.
 	Handoff *handoff.Handoff
+
+	// Demand, when non-nil, observes the jobs the cron library stages
+	// because they were undeliverable.
+	Demand api.StagingObserver
 }
 
 // Interface manages the cron framework, exposing a client to schedule jobs.
@@ -103,6 +107,7 @@ type cron struct {
 	backend         *string
 	backendConfig   any
 	workers         uint32
+	demand          api.StagingObserver
 
 	readyCh chan struct{}
 	closeCh chan struct{}
@@ -121,6 +126,7 @@ func New(opts Options) Interface {
 		etcd:            opts.Etcd,
 		backend:         opts.Backend,
 		backendConfig:   opts.BackendConfig,
+		demand:          opts.Demand,
 	}
 }
 
@@ -142,6 +148,7 @@ func (c *cron) Run(ctx context.Context) error {
 		Workers:         new(c.workers),
 		Backend:         c.backend,
 		BackendConfig:   c.backendConfig,
+		StagingObserver: c.demand,
 	}
 
 	if c.backend == nil || *c.backend == etcdcron.BackendEtcd {

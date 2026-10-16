@@ -68,4 +68,21 @@ func TestNew(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, opts.PlacementEnabled)
 	})
+
+	t.Run("demand-watcher-ids sets DemandWatcherIDs", func(t *testing.T) {
+		opts, err := New([]string{
+			"--demand-watcher-ids=ns1/app1,ns2/app2",
+		})
+		require.NoError(t, err)
+		require.Equal(t, []string{"ns1/app1", "ns2/app2"}, opts.DemandWatcherIDs)
+	})
+
+	for _, id := range []string{"app1", "/app1", "ns1/", "ns1/app1/x"} {
+		t.Run("error when demand-watcher-ids entry is "+id, func(t *testing.T) {
+			_, err := New([]string{
+				"--demand-watcher-ids=" + id,
+			})
+			require.Error(t, err)
+		})
+	}
 }

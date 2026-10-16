@@ -15,6 +15,7 @@ package authz
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"google.golang.org/grpc/codes"
@@ -33,14 +34,22 @@ var log = logger.NewLogger("dapr.scheduler.server.authz")
 
 type Options struct {
 	Security security.Handler
+
+	// DemandWatcherIDs are the <namespace>/<app ID> identities allowed to
+	// call WatchDemand.
+	DemandWatcherIDs []string
 }
 
 type Authz struct {
-	sec security.Handler
+	sec              security.Handler
+	demandWatcherIDs []string
 }
 
 func New(opts Options) *Authz {
-	return &Authz{sec: opts.Security}
+	return &Authz{
+		sec:              opts.Security,
+		demandWatcherIDs: opts.DemandWatcherIDs,
+	}
 }
 
 // Request is a named job request.
@@ -95,6 +104,30 @@ func (a *Authz) job(ctx context.Context, name string, meta *schedulerv1pb.JobMet
 
 func (a *Authz) WatchInitial(ctx context.Context, initial *schedulerv1pb.WatchJobsRequestInitial) error {
 	return a.authz(ctx, initial.GetNamespace(), initial.GetAppId())
+}
+
+// WatchDemand authorizes a WatchDemand stream. The stream reports the
+// waiting work of every app ID in every namespace, so when mTLS is enabled
+// only the identities listed in DemandWatcherIDs may watch it.
+func (a *Authz) WatchDemand(ctx context.Context) error {
+	if !a.sec.MTLSEnabled() {
+		return nil
+	}
+
+	id, ok, err := spiffe.FromGRPCContext(ctx)
+	if err != nil || !ok {
+		log.Debugf("failed to get identity from context: err=%v, ok=%t", err, ok)
+		monitoring.RecordSidecarAuthError()
+		return status.Errorf(codes.Unauthenticated, "failed to get identity from context")
+	}
+
+	if !slices.Contains(a.demandWatcherIDs, id.Namespace()+"/"+id.AppID()) {
+		log.Debugf("identity is not allowed to watch demand: %s/%s", id.Namespace(), id.AppID())
+		monitoring.RecordSidecarAuthError()
+		return status.Errorf(codes.PermissionDenied, "identity %s/%s is not allowed to watch demand", id.Namespace(), id.AppID())
+	}
+
+	return nil
 }
 
 func (a *Authz) authz(ctx context.Context, ns, appID string) error {
