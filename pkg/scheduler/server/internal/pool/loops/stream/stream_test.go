@@ -46,6 +46,14 @@ type suite struct {
 
 func newSuite(t *testing.T) *suite {
 	t.Helper()
+	return newSuiteWith(t, &schedulerv1pb.WatchJobsRequestInitial{
+		AppId:     "app-id",
+		Namespace: "ns",
+	})
+}
+
+func newSuiteWith(t *testing.T, initial *schedulerv1pb.WatchJobsRequestInitial) *suite {
+	t.Helper()
 
 	srv := serverfake.New(t)
 
@@ -68,11 +76,8 @@ func newSuite(t *testing.T) *suite {
 		IDx: 123,
 		Add: &loops.ConnAdd{
 			Channel: serverstream,
-			Request: &schedulerv1pb.WatchJobsRequestInitial{
-				AppId:     "app-id",
-				Namespace: "ns",
-			},
-			Cancel: func(error) {},
+			Request: initial,
+			Cancel:  func(error) {},
 		},
 		NamespaceLoop: nsLoop.Loop(),
 		Cron:          apifake.New(),
@@ -219,6 +224,34 @@ func Test_Stream(t *testing.T) {
 		suite.closeserver()
 		suite.streamLoop.Close(new(loops.StreamShutdown))
 		suite.expectEvent(t, &loops.ConnCloseStream{StreamIDx: 123, Namespace: "ns"})
+	})
+
+	t.Run("dead-letter stream may answer undeliverable", func(t *testing.T) {
+		t.Parallel()
+
+		suite := newSuiteWith(t, &schedulerv1pb.WatchJobsRequestInitial{
+			AppId:      "app-id",
+			Namespace:  "ns",
+			DeadLetter: &schedulerv1pb.WatchJobsDeadLetter{AppIds: []string{"*"}},
+		})
+
+		suite.roundTrip(t, "job-1", 1, schedulerv1pb.WatchJobsRequestResultStatus_UNDELIVERABLE, api.TriggerResponseResult_UNDELIVERABLE)
+		suite.roundTrip(t, "job-2", 2, schedulerv1pb.WatchJobsRequestResultStatus_SUCCESS, api.TriggerResponseResult_SUCCESS)
+		suite.expectNoEvent(t)
+
+		suite.closeserver()
+		suite.streamLoop.Close(new(loops.StreamShutdown))
+		suite.expectEvent(t, &loops.ConnCloseStream{StreamIDx: 123, Namespace: "ns"})
+	})
+
+	t.Run("undeliverable answer from a non dead-letter stream resolves the trigger and closes the stream", func(t *testing.T) {
+		t.Parallel()
+
+		suite := newSuite(t)
+
+		suite.roundTrip(t, "job-1", 1, schedulerv1pb.WatchJobsRequestResultStatus_UNDELIVERABLE, api.TriggerResponseResult_UNDELIVERABLE)
+		suite.expectEvent(t, &loops.ConnCloseStream{StreamIDx: 123, Namespace: "ns"})
+		suite.streamLoop.Close(new(loops.StreamShutdown))
 	})
 
 	t.Run("receiving an initial request from client should close stream", func(t *testing.T) {

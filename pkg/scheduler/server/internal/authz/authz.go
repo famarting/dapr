@@ -15,6 +15,7 @@ package authz
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"google.golang.org/grpc/codes"
@@ -33,14 +34,22 @@ var log = logger.NewLogger("dapr.scheduler.server.authz")
 
 type Options struct {
 	Security security.Handler
+
+	// DeadLetterAppIDs are the App IDs allowed to subscribe to WatchJobs as a
+	// dead-letter consumer in their own namespace.
+	DeadLetterAppIDs []string
 }
 
 type Authz struct {
-	sec security.Handler
+	sec              security.Handler
+	deadLetterAppIDs []string
 }
 
 func New(opts Options) *Authz {
-	return &Authz{sec: opts.Security}
+	return &Authz{
+		sec:              opts.Security,
+		deadLetterAppIDs: opts.DeadLetterAppIDs,
+	}
 }
 
 // Request is a named job request.
@@ -93,8 +102,24 @@ func (a *Authz) job(ctx context.Context, name string, meta *schedulerv1pb.JobMet
 	return nil
 }
 
+// WatchInitial authorizes a WatchJobs stream. A dead-letter stream receives
+// the undeliverable triggers of every App ID in its namespace, so it is
+// additionally restricted to the allowed dead-letter App IDs. It is held to
+// the caller's own namespace like every other stream: a stream only receives
+// triggers of the namespace it declares, which must match the caller's
+// identity.
 func (a *Authz) WatchInitial(ctx context.Context, initial *schedulerv1pb.WatchJobsRequestInitial) error {
-	return a.authz(ctx, initial.GetNamespace(), initial.GetAppId())
+	if err := a.authz(ctx, initial.GetNamespace(), initial.GetAppId()); err != nil {
+		return err
+	}
+
+	if initial.GetDeadLetter() != nil && !slices.Contains(a.deadLetterAppIDs, initial.GetAppId()) {
+		log.Debugf("app is not allowed to subscribe to dead-letter jobs: %s/%s", initial.GetNamespace(), initial.GetAppId())
+		monitoring.RecordSidecarAuthError()
+		return status.Errorf(codes.PermissionDenied, "app ID %s is not allowed to subscribe to dead-letter jobs", initial.GetAppId())
+	}
+
+	return nil
 }
 
 func (a *Authz) authz(ctx context.Context, ns, appID string) error {

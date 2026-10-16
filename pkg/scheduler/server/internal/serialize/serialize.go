@@ -17,8 +17,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	schedulerv1pb "github.com/dapr/dapr/pkg/proto/scheduler/v1"
@@ -27,7 +30,8 @@ import (
 )
 
 type Options struct {
-	Security security.Handler
+	Security         security.Handler
+	DeadLetterAppIDs []string
 }
 
 type Serializer struct {
@@ -44,7 +48,8 @@ type Job struct {
 func New(opts Options) *Serializer {
 	return &Serializer{
 		authz: authz.New(authz.Options{
-			Security: opts.Security,
+			Security:         opts.Security,
+			DeadLetterAppIDs: opts.DeadLetterAppIDs,
 		}),
 	}
 }
@@ -125,7 +130,39 @@ func (s *Serializer) FromWatch(stream schedulerv1pb.Scheduler_WatchJobsServer) (
 		typesImpl[t] = struct{}{}
 	}
 
+	if err := validateDeadLetter(initial); err != nil {
+		return nil, err
+	}
+
 	return initial, nil
+}
+
+// validateDeadLetter checks a dead-letter stream selects at least one target
+// and declares no target of its own.
+func validateDeadLetter(initial *schedulerv1pb.WatchJobsRequestInitial) error {
+	dl := initial.GetDeadLetter()
+	if dl == nil {
+		return nil
+	}
+
+	if len(dl.GetActorTypes()) == 0 && len(dl.GetAppIds()) == 0 {
+		return status.Error(codes.InvalidArgument, "dead-letter filter must select at least one actor type or app ID")
+	}
+
+	if slices.Contains(dl.GetActorTypes(), "") || slices.Contains(dl.GetAppIds(), "") {
+		return status.Error(codes.InvalidArgument, "dead-letter filter must not contain an empty entry")
+	}
+
+	if len(initial.GetActorTypes()) > 0 ||
+		len(initial.GetAcceptJobTypes()) > 0 ||
+		len(initial.GetConcurrencyLimits()) > 0 ||
+		initial.ActorAddress != nil ||
+		initial.GetSupportsSchedulerPlacement() ||
+		len(initial.GetPlacementAddresses()) > 0 {
+		return status.Error(codes.InvalidArgument, "dead-letter stream must not declare targets, concurrency limits or placement")
+	}
+
+	return nil
 }
 
 func (j *Job) Name() string {

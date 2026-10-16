@@ -121,8 +121,12 @@ func (p *Pool) AddConnection(req *schedulerv1pb.WatchJobsRequestInitial, stream 
 
 	ctx, cancel := context.WithCancelCause(stream.Context())
 
-	p.trackAddresses(ctx, req.GetPlacementAddresses())
-	p.trackCapability(ctx, req.GetSupportsSchedulerPlacement())
+	// A dead-letter consumer is not a sidecar, so it takes no part in
+	// gating the placement advertisement.
+	if req.GetDeadLetter() == nil {
+		p.trackAddresses(ctx, req.GetPlacementAddresses())
+		p.trackCapability(ctx, req.GetSupportsSchedulerPlacement())
+	}
 
 	p.nsLoop.Enqueue(&loops.ConnAdd{
 		Request: req,

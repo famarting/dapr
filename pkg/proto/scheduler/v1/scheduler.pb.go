@@ -81,6 +81,9 @@ const (
 	WatchJobsRequestResultStatus_SUCCESS WatchJobsRequestResultStatus = 0
 	// The job was processed with an error.
 	WatchJobsRequestResultStatus_FAILED WatchJobsRequestResultStatus = 1
+	// The job could not be delivered to its target, so it waits until a
+	// stream serving the target connects. Only valid on a dead-letter stream.
+	WatchJobsRequestResultStatus_UNDELIVERABLE WatchJobsRequestResultStatus = 2
 )
 
 // Enum value maps for WatchJobsRequestResultStatus.
@@ -88,10 +91,12 @@ var (
 	WatchJobsRequestResultStatus_name = map[int32]string{
 		0: "SUCCESS",
 		1: "FAILED",
+		2: "UNDELIVERABLE",
 	}
 	WatchJobsRequestResultStatus_value = map[string]int32{
-		"SUCCESS": 0,
-		"FAILED":  1,
+		"SUCCESS":       0,
+		"FAILED":        1,
+		"UNDELIVERABLE": 2,
 	}
 )
 
@@ -599,6 +604,27 @@ type WatchJobsRequestInitial struct {
 	// the well-known service name still withholds the placement leader
 	// advertisement while it runs.
 	PlacementAddresses []string `protobuf:"bytes,8,rep,name=placement_addresses,json=placementAddresses,proto3" json:"placement_addresses,omitempty"`
+	// dead_letter, when set, makes this stream a dead-letter consumer instead
+	// of a job target. The scheduler delivers to it the triggers matching the
+	// filter which no other stream in the namespace serves, rather than
+	// answering them undeliverable itself. The subscription is scoped to the
+	// stream's own namespace. A dead-letter stream serves no target of its
+	// own, so actor_types, accept_job_types, concurrency_limits,
+	// actor_address, supports_scheduler_placement and placement_addresses
+	// must be unset. The App ID must be allowed by the scheduler's
+	// --dead-letter-app-ids flag.
+	//
+	// The consumer answers each trigger as normal. UNDELIVERABLE leaves the
+	// job waiting for a target, exactly as if no dead-letter consumer were
+	// connected. SUCCESS and FAILED are authoritative: SUCCESS counts the
+	// trigger as delivered and FAILED applies the job's failure policy, so a
+	// consumer which only observes must answer UNDELIVERABLE.
+	//
+	// Each time a dead-letter stream connects, every scheduler replays to the
+	// dead-letter consumers of the namespace the jobs it holds waiting for a
+	// target which match the filter, so consumers must tolerate a trigger
+	// being delivered more than once.
+	DeadLetter *WatchJobsDeadLetter `protobuf:"bytes,9,opt,name=dead_letter,json=deadLetter,proto3" json:"dead_letter,omitempty"`
 }
 
 func (x *WatchJobsRequestInitial) Reset() {
@@ -689,6 +715,75 @@ func (x *WatchJobsRequestInitial) GetPlacementAddresses() []string {
 	return nil
 }
 
+func (x *WatchJobsRequestInitial) GetDeadLetter() *WatchJobsDeadLetter {
+	if x != nil {
+		return x.DeadLetter
+	}
+	return nil
+}
+
+// WatchJobsDeadLetter selects the undeliverable triggers delivered to a
+// dead-letter stream. A trigger matches when its target matches any entry.
+// Entries are matched in full; '*' matches any run of characters, including
+// none.
+type WatchJobsDeadLetter struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// actor_types matches actor reminder triggers by actor type, for example
+	// "dapr.internal.default.*.workflow".
+	ActorTypes []string `protobuf:"bytes,1,rep,name=actor_types,json=actorTypes,proto3" json:"actor_types,omitempty"`
+	// app_ids matches job triggers by the App ID of the job.
+	AppIds []string `protobuf:"bytes,2,rep,name=app_ids,json=appIds,proto3" json:"app_ids,omitempty"`
+}
+
+func (x *WatchJobsDeadLetter) Reset() {
+	*x = WatchJobsDeadLetter{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[7]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *WatchJobsDeadLetter) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WatchJobsDeadLetter) ProtoMessage() {}
+
+func (x *WatchJobsDeadLetter) ProtoReflect() protoreflect.Message {
+	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[7]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WatchJobsDeadLetter.ProtoReflect.Descriptor instead.
+func (*WatchJobsDeadLetter) Descriptor() ([]byte, []int) {
+	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *WatchJobsDeadLetter) GetActorTypes() []string {
+	if x != nil {
+		return x.ActorTypes
+	}
+	return nil
+}
+
+func (x *WatchJobsDeadLetter) GetAppIds() []string {
+	if x != nil {
+		return x.AppIds
+	}
+	return nil
+}
+
 // ConcurrencyLimit defines a global concurrency limit enforced by the
 // scheduler across all replicas.
 type ConcurrencyLimit struct {
@@ -717,7 +812,7 @@ type ConcurrencyLimit struct {
 func (x *ConcurrencyLimit) Reset() {
 	*x = ConcurrencyLimit{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[7]
+		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[8]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -730,7 +825,7 @@ func (x *ConcurrencyLimit) String() string {
 func (*ConcurrencyLimit) ProtoMessage() {}
 
 func (x *ConcurrencyLimit) ProtoReflect() protoreflect.Message {
-	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[7]
+	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[8]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -743,7 +838,7 @@ func (x *ConcurrencyLimit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConcurrencyLimit.ProtoReflect.Descriptor instead.
 func (*ConcurrencyLimit) Descriptor() ([]byte, []int) {
-	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{7}
+	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ConcurrencyLimit) GetMaxConcurrent() int32 {
@@ -801,7 +896,7 @@ type ConcurrencyLimitActor struct {
 func (x *ConcurrencyLimitActor) Reset() {
 	*x = ConcurrencyLimitActor{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[8]
+		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[9]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -814,7 +909,7 @@ func (x *ConcurrencyLimitActor) String() string {
 func (*ConcurrencyLimitActor) ProtoMessage() {}
 
 func (x *ConcurrencyLimitActor) ProtoReflect() protoreflect.Message {
-	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[8]
+	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[9]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -827,7 +922,7 @@ func (x *ConcurrencyLimitActor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConcurrencyLimitActor.ProtoReflect.Descriptor instead.
 func (*ConcurrencyLimitActor) Descriptor() ([]byte, []int) {
-	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{8}
+	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ConcurrencyLimitActor) GetType() string {
@@ -853,7 +948,7 @@ type WatchJobsRequestResult struct {
 func (x *WatchJobsRequestResult) Reset() {
 	*x = WatchJobsRequestResult{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[9]
+		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[10]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -866,7 +961,7 @@ func (x *WatchJobsRequestResult) String() string {
 func (*WatchJobsRequestResult) ProtoMessage() {}
 
 func (x *WatchJobsRequestResult) ProtoReflect() protoreflect.Message {
-	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[9]
+	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[10]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -879,7 +974,7 @@ func (x *WatchJobsRequestResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchJobsRequestResult.ProtoReflect.Descriptor instead.
 func (*WatchJobsRequestResult) Descriptor() ([]byte, []int) {
-	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{9}
+	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *WatchJobsRequestResult) GetId() uint64 {
@@ -916,7 +1011,7 @@ type WatchJobsResponse struct {
 func (x *WatchJobsResponse) Reset() {
 	*x = WatchJobsResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[10]
+		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[11]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -929,7 +1024,7 @@ func (x *WatchJobsResponse) String() string {
 func (*WatchJobsResponse) ProtoMessage() {}
 
 func (x *WatchJobsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[10]
+	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[11]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -942,7 +1037,7 @@ func (x *WatchJobsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchJobsResponse.ProtoReflect.Descriptor instead.
 func (*WatchJobsResponse) Descriptor() ([]byte, []int) {
-	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{10}
+	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *WatchJobsResponse) GetName() string {
@@ -991,7 +1086,7 @@ type ScheduleJobRequest struct {
 func (x *ScheduleJobRequest) Reset() {
 	*x = ScheduleJobRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[11]
+		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[12]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1004,7 +1099,7 @@ func (x *ScheduleJobRequest) String() string {
 func (*ScheduleJobRequest) ProtoMessage() {}
 
 func (x *ScheduleJobRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[11]
+	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[12]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1017,7 +1112,7 @@ func (x *ScheduleJobRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScheduleJobRequest.ProtoReflect.Descriptor instead.
 func (*ScheduleJobRequest) Descriptor() ([]byte, []int) {
-	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{11}
+	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ScheduleJobRequest) GetName() string {
@@ -1057,7 +1152,7 @@ type ScheduleJobResponse struct {
 func (x *ScheduleJobResponse) Reset() {
 	*x = ScheduleJobResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[12]
+		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[13]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1070,7 +1165,7 @@ func (x *ScheduleJobResponse) String() string {
 func (*ScheduleJobResponse) ProtoMessage() {}
 
 func (x *ScheduleJobResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[12]
+	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[13]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1083,7 +1178,7 @@ func (x *ScheduleJobResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScheduleJobResponse.ProtoReflect.Descriptor instead.
 func (*ScheduleJobResponse) Descriptor() ([]byte, []int) {
-	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{12}
+	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{13}
 }
 
 // GetJobRequest is the message used by the daprd sidecar to delete or get a job.
@@ -1101,7 +1196,7 @@ type GetJobRequest struct {
 func (x *GetJobRequest) Reset() {
 	*x = GetJobRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[13]
+		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[14]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1114,7 +1209,7 @@ func (x *GetJobRequest) String() string {
 func (*GetJobRequest) ProtoMessage() {}
 
 func (x *GetJobRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[13]
+	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[14]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1127,7 +1222,7 @@ func (x *GetJobRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetJobRequest.ProtoReflect.Descriptor instead.
 func (*GetJobRequest) Descriptor() ([]byte, []int) {
-	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{13}
+	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *GetJobRequest) GetName() string {
@@ -1157,7 +1252,7 @@ type GetJobResponse struct {
 func (x *GetJobResponse) Reset() {
 	*x = GetJobResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[14]
+		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[15]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1170,7 +1265,7 @@ func (x *GetJobResponse) String() string {
 func (*GetJobResponse) ProtoMessage() {}
 
 func (x *GetJobResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[14]
+	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[15]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1183,7 +1278,7 @@ func (x *GetJobResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetJobResponse.ProtoReflect.Descriptor instead.
 func (*GetJobResponse) Descriptor() ([]byte, []int) {
-	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{14}
+	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *GetJobResponse) GetJob() *Job {
@@ -1207,7 +1302,7 @@ type DeleteJobRequest struct {
 func (x *DeleteJobRequest) Reset() {
 	*x = DeleteJobRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[15]
+		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[16]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1220,7 +1315,7 @@ func (x *DeleteJobRequest) String() string {
 func (*DeleteJobRequest) ProtoMessage() {}
 
 func (x *DeleteJobRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[15]
+	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[16]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1233,7 +1328,7 @@ func (x *DeleteJobRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteJobRequest.ProtoReflect.Descriptor instead.
 func (*DeleteJobRequest) Descriptor() ([]byte, []int) {
-	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{15}
+	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *DeleteJobRequest) GetName() string {
@@ -1260,7 +1355,7 @@ type DeleteJobResponse struct {
 func (x *DeleteJobResponse) Reset() {
 	*x = DeleteJobResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[16]
+		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[17]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1273,7 +1368,7 @@ func (x *DeleteJobResponse) String() string {
 func (*DeleteJobResponse) ProtoMessage() {}
 
 func (x *DeleteJobResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[16]
+	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[17]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1286,7 +1381,7 @@ func (x *DeleteJobResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteJobResponse.ProtoReflect.Descriptor instead.
 func (*DeleteJobResponse) Descriptor() ([]byte, []int) {
-	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{16}
+	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{17}
 }
 
 // NamedJob is a job with a name.
@@ -1306,7 +1401,7 @@ type NamedJob struct {
 func (x *NamedJob) Reset() {
 	*x = NamedJob{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[17]
+		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[18]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1319,7 +1414,7 @@ func (x *NamedJob) String() string {
 func (*NamedJob) ProtoMessage() {}
 
 func (x *NamedJob) ProtoReflect() protoreflect.Message {
-	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[17]
+	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[18]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1332,7 +1427,7 @@ func (x *NamedJob) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NamedJob.ProtoReflect.Descriptor instead.
 func (*NamedJob) Descriptor() ([]byte, []int) {
-	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{17}
+	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *NamedJob) GetName() string {
@@ -1369,7 +1464,7 @@ type ListJobsRequest struct {
 func (x *ListJobsRequest) Reset() {
 	*x = ListJobsRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[18]
+		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[19]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1382,7 +1477,7 @@ func (x *ListJobsRequest) String() string {
 func (*ListJobsRequest) ProtoMessage() {}
 
 func (x *ListJobsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[18]
+	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[19]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1395,7 +1490,7 @@ func (x *ListJobsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListJobsRequest.ProtoReflect.Descriptor instead.
 func (*ListJobsRequest) Descriptor() ([]byte, []int) {
-	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{18}
+	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ListJobsRequest) GetMetadata() *JobMetadata {
@@ -1418,7 +1513,7 @@ type ListJobsResponse struct {
 func (x *ListJobsResponse) Reset() {
 	*x = ListJobsResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[19]
+		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[20]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1431,7 +1526,7 @@ func (x *ListJobsResponse) String() string {
 func (*ListJobsResponse) ProtoMessage() {}
 
 func (x *ListJobsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[19]
+	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[20]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1444,7 +1539,7 @@ func (x *ListJobsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListJobsResponse.ProtoReflect.Descriptor instead.
 func (*ListJobsResponse) Descriptor() ([]byte, []int) {
-	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{19}
+	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ListJobsResponse) GetJobs() []*NamedJob {
@@ -1465,7 +1560,7 @@ type WatchHostsRequest struct {
 func (x *WatchHostsRequest) Reset() {
 	*x = WatchHostsRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[20]
+		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[21]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1478,7 +1573,7 @@ func (x *WatchHostsRequest) String() string {
 func (*WatchHostsRequest) ProtoMessage() {}
 
 func (x *WatchHostsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[20]
+	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[21]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1491,7 +1586,7 @@ func (x *WatchHostsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchHostsRequest.ProtoReflect.Descriptor instead.
 func (*WatchHostsRequest) Descriptor() ([]byte, []int) {
-	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{20}
+	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{21}
 }
 
 // WatchHostsResponse is the response message to convey the details of a host.
@@ -1507,7 +1602,7 @@ type WatchHostsResponse struct {
 func (x *WatchHostsResponse) Reset() {
 	*x = WatchHostsResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[21]
+		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[22]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1520,7 +1615,7 @@ func (x *WatchHostsResponse) String() string {
 func (*WatchHostsResponse) ProtoMessage() {}
 
 func (x *WatchHostsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[21]
+	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[22]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1533,7 +1628,7 @@ func (x *WatchHostsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchHostsResponse.ProtoReflect.Descriptor instead.
 func (*WatchHostsResponse) Descriptor() ([]byte, []int) {
-	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{21}
+	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *WatchHostsResponse) GetHosts() []*Host {
@@ -1565,7 +1660,7 @@ type Host struct {
 func (x *Host) Reset() {
 	*x = Host{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[22]
+		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[23]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1578,7 +1673,7 @@ func (x *Host) String() string {
 func (*Host) ProtoMessage() {}
 
 func (x *Host) ProtoReflect() protoreflect.Message {
-	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[22]
+	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[23]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1591,7 +1686,7 @@ func (x *Host) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Host.ProtoReflect.Descriptor instead.
 func (*Host) Descriptor() ([]byte, []int) {
-	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{22}
+	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *Host) GetAddress() string {
@@ -1634,7 +1729,7 @@ type DeleteByMetadataRequest struct {
 func (x *DeleteByMetadataRequest) Reset() {
 	*x = DeleteByMetadataRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[23]
+		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[24]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1647,7 +1742,7 @@ func (x *DeleteByMetadataRequest) String() string {
 func (*DeleteByMetadataRequest) ProtoMessage() {}
 
 func (x *DeleteByMetadataRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[23]
+	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[24]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1660,7 +1755,7 @@ func (x *DeleteByMetadataRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteByMetadataRequest.ProtoReflect.Descriptor instead.
 func (*DeleteByMetadataRequest) Descriptor() ([]byte, []int) {
-	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{23}
+	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *DeleteByMetadataRequest) GetMetadata() *JobMetadata {
@@ -1687,7 +1782,7 @@ type DeleteByMetadataResponse struct {
 func (x *DeleteByMetadataResponse) Reset() {
 	*x = DeleteByMetadataResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[24]
+		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[25]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1700,7 +1795,7 @@ func (x *DeleteByMetadataResponse) String() string {
 func (*DeleteByMetadataResponse) ProtoMessage() {}
 
 func (x *DeleteByMetadataResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[24]
+	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[25]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1713,7 +1808,7 @@ func (x *DeleteByMetadataResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteByMetadataResponse.ProtoReflect.Descriptor instead.
 func (*DeleteByMetadataResponse) Descriptor() ([]byte, []int) {
-	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{24}
+	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{25}
 }
 
 // DeleteByNamePrefixRequest is the message used by the daprd sidecar to delete jobs by name prefix.
@@ -1733,7 +1828,7 @@ type DeleteByNamePrefixRequest struct {
 func (x *DeleteByNamePrefixRequest) Reset() {
 	*x = DeleteByNamePrefixRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[25]
+		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[26]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1746,7 +1841,7 @@ func (x *DeleteByNamePrefixRequest) String() string {
 func (*DeleteByNamePrefixRequest) ProtoMessage() {}
 
 func (x *DeleteByNamePrefixRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[25]
+	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[26]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1759,7 +1854,7 @@ func (x *DeleteByNamePrefixRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteByNamePrefixRequest.ProtoReflect.Descriptor instead.
 func (*DeleteByNamePrefixRequest) Descriptor() ([]byte, []int) {
-	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{25}
+	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *DeleteByNamePrefixRequest) GetNamePrefix() string {
@@ -1785,7 +1880,7 @@ type DeleteByNamePrefixResponse struct {
 func (x *DeleteByNamePrefixResponse) Reset() {
 	*x = DeleteByNamePrefixResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[26]
+		mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[27]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1798,7 +1893,7 @@ func (x *DeleteByNamePrefixResponse) String() string {
 func (*DeleteByNamePrefixResponse) ProtoMessage() {}
 
 func (x *DeleteByNamePrefixResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[26]
+	mi := &file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[27]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1811,7 +1906,7 @@ func (x *DeleteByNamePrefixResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteByNamePrefixResponse.ProtoReflect.Descriptor instead.
 func (*DeleteByNamePrefixResponse) Descriptor() ([]byte, []int) {
-	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{26}
+	return file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP(), []int{27}
 }
 
 var File_dapr_proto_scheduler_v1_scheduler_proto protoreflect.FileDescriptor
@@ -1886,8 +1981,8 @@ var file_dapr_proto_scheduler_v1_scheduler_proto_rawDesc = []byte{
 	0x2e, 0x76, 0x31, 0x2e, 0x57, 0x61, 0x74, 0x63, 0x68, 0x4a, 0x6f, 0x62, 0x73, 0x52, 0x65, 0x71,
 	0x75, 0x65, 0x73, 0x74, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x48, 0x00, 0x52, 0x06, 0x72, 0x65,
 	0x73, 0x75, 0x6c, 0x74, 0x42, 0x18, 0x0a, 0x16, 0x77, 0x61, 0x74, 0x63, 0x68, 0x5f, 0x6a, 0x6f,
-	0x62, 0x5f, 0x72, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x5f, 0x74, 0x79, 0x70, 0x65, 0x22, 0xca,
-	0x03, 0x0a, 0x17, 0x57, 0x61, 0x74, 0x63, 0x68, 0x4a, 0x6f, 0x62, 0x73, 0x52, 0x65, 0x71, 0x75,
+	0x62, 0x5f, 0x72, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x5f, 0x74, 0x79, 0x70, 0x65, 0x22, 0x99,
+	0x04, 0x0a, 0x17, 0x57, 0x61, 0x74, 0x63, 0x68, 0x4a, 0x6f, 0x62, 0x73, 0x52, 0x65, 0x71, 0x75,
 	0x65, 0x73, 0x74, 0x49, 0x6e, 0x69, 0x74, 0x69, 0x61, 0x6c, 0x12, 0x15, 0x0a, 0x06, 0x61, 0x70,
 	0x70, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x61, 0x70, 0x70, 0x49,
 	0x64, 0x12, 0x1c, 0x0a, 0x09, 0x6e, 0x61, 0x6d, 0x65, 0x73, 0x70, 0x61, 0x63, 0x65, 0x18, 0x02,
@@ -1914,8 +2009,18 @@ var file_dapr_proto_scheduler_v1_scheduler_proto_rawDesc = []byte{
 	0x6c, 0x61, 0x63, 0x65, 0x6d, 0x65, 0x6e, 0x74, 0x12, 0x2f, 0x0a, 0x13, 0x70, 0x6c, 0x61, 0x63,
 	0x65, 0x6d, 0x65, 0x6e, 0x74, 0x5f, 0x61, 0x64, 0x64, 0x72, 0x65, 0x73, 0x73, 0x65, 0x73, 0x18,
 	0x08, 0x20, 0x03, 0x28, 0x09, 0x52, 0x12, 0x70, 0x6c, 0x61, 0x63, 0x65, 0x6d, 0x65, 0x6e, 0x74,
-	0x41, 0x64, 0x64, 0x72, 0x65, 0x73, 0x73, 0x65, 0x73, 0x42, 0x10, 0x0a, 0x0e, 0x5f, 0x61, 0x63,
-	0x74, 0x6f, 0x72, 0x5f, 0x61, 0x64, 0x64, 0x72, 0x65, 0x73, 0x73, 0x22, 0xad, 0x01, 0x0a, 0x10,
+	0x41, 0x64, 0x64, 0x72, 0x65, 0x73, 0x73, 0x65, 0x73, 0x12, 0x4d, 0x0a, 0x0b, 0x64, 0x65, 0x61,
+	0x64, 0x5f, 0x6c, 0x65, 0x74, 0x74, 0x65, 0x72, 0x18, 0x09, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x2c,
+	0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65,
+	0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x57, 0x61, 0x74, 0x63, 0x68, 0x4a, 0x6f,
+	0x62, 0x73, 0x44, 0x65, 0x61, 0x64, 0x4c, 0x65, 0x74, 0x74, 0x65, 0x72, 0x52, 0x0a, 0x64, 0x65,
+	0x61, 0x64, 0x4c, 0x65, 0x74, 0x74, 0x65, 0x72, 0x42, 0x10, 0x0a, 0x0e, 0x5f, 0x61, 0x63, 0x74,
+	0x6f, 0x72, 0x5f, 0x61, 0x64, 0x64, 0x72, 0x65, 0x73, 0x73, 0x22, 0x4f, 0x0a, 0x13, 0x57, 0x61,
+	0x74, 0x63, 0x68, 0x4a, 0x6f, 0x62, 0x73, 0x44, 0x65, 0x61, 0x64, 0x4c, 0x65, 0x74, 0x74, 0x65,
+	0x72, 0x12, 0x1f, 0x0a, 0x0b, 0x61, 0x63, 0x74, 0x6f, 0x72, 0x5f, 0x74, 0x79, 0x70, 0x65, 0x73,
+	0x18, 0x01, 0x20, 0x03, 0x28, 0x09, 0x52, 0x0a, 0x61, 0x63, 0x74, 0x6f, 0x72, 0x54, 0x79, 0x70,
+	0x65, 0x73, 0x12, 0x17, 0x0a, 0x07, 0x61, 0x70, 0x70, 0x5f, 0x69, 0x64, 0x73, 0x18, 0x02, 0x20,
+	0x03, 0x28, 0x09, 0x52, 0x06, 0x61, 0x70, 0x70, 0x49, 0x64, 0x73, 0x22, 0xad, 0x01, 0x0a, 0x10,
 	0x43, 0x6f, 0x6e, 0x63, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x63, 0x79, 0x4c, 0x69, 0x6d, 0x69, 0x74,
 	0x12, 0x25, 0x0a, 0x0e, 0x6d, 0x61, 0x78, 0x5f, 0x63, 0x6f, 0x6e, 0x63, 0x75, 0x72, 0x72, 0x65,
 	0x6e, 0x74, 0x18, 0x01, 0x20, 0x01, 0x28, 0x05, 0x52, 0x0d, 0x6d, 0x61, 0x78, 0x43, 0x6f, 0x6e,
@@ -2038,77 +2143,78 @@ var file_dapr_proto_scheduler_v1_scheduler_proto_rawDesc = []byte{
 	0x54, 0x41, 0x52, 0x47, 0x45, 0x54, 0x5f, 0x54, 0x59, 0x50, 0x45, 0x5f, 0x4a, 0x4f, 0x42, 0x10,
 	0x00, 0x12, 0x22, 0x0a, 0x1e, 0x4a, 0x4f, 0x42, 0x5f, 0x54, 0x41, 0x52, 0x47, 0x45, 0x54, 0x5f,
 	0x54, 0x59, 0x50, 0x45, 0x5f, 0x41, 0x43, 0x54, 0x4f, 0x52, 0x5f, 0x52, 0x45, 0x4d, 0x49, 0x4e,
-	0x44, 0x45, 0x52, 0x10, 0x01, 0x2a, 0x37, 0x0a, 0x1c, 0x57, 0x61, 0x74, 0x63, 0x68, 0x4a, 0x6f,
+	0x44, 0x45, 0x52, 0x10, 0x01, 0x2a, 0x4a, 0x0a, 0x1c, 0x57, 0x61, 0x74, 0x63, 0x68, 0x4a, 0x6f,
 	0x62, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x53,
 	0x74, 0x61, 0x74, 0x75, 0x73, 0x12, 0x0b, 0x0a, 0x07, 0x53, 0x55, 0x43, 0x43, 0x45, 0x53, 0x53,
-	0x10, 0x00, 0x12, 0x0a, 0x0a, 0x06, 0x46, 0x41, 0x49, 0x4c, 0x45, 0x44, 0x10, 0x01, 0x32, 0xe3,
-	0x07, 0x0a, 0x09, 0x53, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x12, 0x6a, 0x0a, 0x0b,
-	0x53, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x4a, 0x6f, 0x62, 0x12, 0x2b, 0x2e, 0x64, 0x61,
+	0x10, 0x00, 0x12, 0x0a, 0x0a, 0x06, 0x46, 0x41, 0x49, 0x4c, 0x45, 0x44, 0x10, 0x01, 0x12, 0x11,
+	0x0a, 0x0d, 0x55, 0x4e, 0x44, 0x45, 0x4c, 0x49, 0x56, 0x45, 0x52, 0x41, 0x42, 0x4c, 0x45, 0x10,
+	0x02, 0x32, 0xe3, 0x07, 0x0a, 0x09, 0x53, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x12,
+	0x6a, 0x0a, 0x0b, 0x53, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x4a, 0x6f, 0x62, 0x12, 0x2b,
+	0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65,
+	0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x53, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c,
+	0x65, 0x4a, 0x6f, 0x62, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x2c, 0x2e, 0x64, 0x61,
 	0x70, 0x72, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c,
 	0x65, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x53, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x4a, 0x6f,
-	0x62, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x2c, 0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e,
-	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e,
-	0x76, 0x31, 0x2e, 0x53, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x4a, 0x6f, 0x62, 0x52, 0x65,
-	0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x5b, 0x0a, 0x06, 0x47, 0x65, 0x74, 0x4a,
-	0x6f, 0x62, 0x12, 0x26, 0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
-	0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x65, 0x74,
-	0x4a, 0x6f, 0x62, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x27, 0x2e, 0x64, 0x61, 0x70,
-	0x72, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65,
-	0x72, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x65, 0x74, 0x4a, 0x6f, 0x62, 0x52, 0x65, 0x73, 0x70, 0x6f,
-	0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x64, 0x0a, 0x09, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x4a,
-	0x6f, 0x62, 0x12, 0x29, 0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
-	0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x44, 0x65, 0x6c,
-	0x65, 0x74, 0x65, 0x4a, 0x6f, 0x62, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x2a, 0x2e,
-	0x64, 0x61, 0x70, 0x72, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64,
-	0x75, 0x6c, 0x65, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x4a, 0x6f,
-	0x62, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x68, 0x0a, 0x09, 0x57,
-	0x61, 0x74, 0x63, 0x68, 0x4a, 0x6f, 0x62, 0x73, 0x12, 0x29, 0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e,
-	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e,
-	0x76, 0x31, 0x2e, 0x57, 0x61, 0x74, 0x63, 0x68, 0x4a, 0x6f, 0x62, 0x73, 0x52, 0x65, 0x71, 0x75,
-	0x65, 0x73, 0x74, 0x1a, 0x2a, 0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
-	0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x57, 0x61,
-	0x74, 0x63, 0x68, 0x4a, 0x6f, 0x62, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22,
-	0x00, 0x28, 0x01, 0x30, 0x01, 0x12, 0x61, 0x0a, 0x08, 0x4c, 0x69, 0x73, 0x74, 0x4a, 0x6f, 0x62,
-	0x73, 0x12, 0x28, 0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73,
-	0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x4c, 0x69, 0x73, 0x74,
-	0x4a, 0x6f, 0x62, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x29, 0x2e, 0x64, 0x61,
-	0x70, 0x72, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c,
-	0x65, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x4c, 0x69, 0x73, 0x74, 0x4a, 0x6f, 0x62, 0x73, 0x52, 0x65,
-	0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x69, 0x0a, 0x0a, 0x57, 0x61, 0x74, 0x63,
-	0x68, 0x48, 0x6f, 0x73, 0x74, 0x73, 0x12, 0x2a, 0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e, 0x70, 0x72,
-	0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e, 0x76, 0x31,
-	0x2e, 0x57, 0x61, 0x74, 0x63, 0x68, 0x48, 0x6f, 0x73, 0x74, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65,
-	0x73, 0x74, 0x1a, 0x2b, 0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
-	0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x57, 0x61, 0x74,
-	0x63, 0x68, 0x48, 0x6f, 0x73, 0x74, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22,
-	0x00, 0x30, 0x01, 0x12, 0x79, 0x0a, 0x10, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x42, 0x79, 0x4d,
-	0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0x12, 0x30, 0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e, 0x76,
-	0x31, 0x2e, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x42, 0x79, 0x4d, 0x65, 0x74, 0x61, 0x64, 0x61,
-	0x74, 0x61, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x31, 0x2e, 0x64, 0x61, 0x70, 0x72,
-	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72,
-	0x2e, 0x76, 0x31, 0x2e, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x42, 0x79, 0x4d, 0x65, 0x74, 0x61,
-	0x64, 0x61, 0x74, 0x61, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x7f,
-	0x0a, 0x12, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x42, 0x79, 0x4e, 0x61, 0x6d, 0x65, 0x50, 0x72,
-	0x65, 0x66, 0x69, 0x78, 0x12, 0x32, 0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e, 0x70, 0x72, 0x6f, 0x74,
-	0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x44,
-	0x65, 0x6c, 0x65, 0x74, 0x65, 0x42, 0x79, 0x4e, 0x61, 0x6d, 0x65, 0x50, 0x72, 0x65, 0x66, 0x69,
-	0x78, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x33, 0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e,
-	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e,
-	0x76, 0x31, 0x2e, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x42, 0x79, 0x4e, 0x61, 0x6d, 0x65, 0x50,
-	0x72, 0x65, 0x66, 0x69, 0x78, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12,
-	0x73, 0x0a, 0x10, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x41, 0x63, 0x74, 0x6f, 0x72, 0x54, 0x79,
-	0x70, 0x65, 0x73, 0x12, 0x30, 0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
-	0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x52, 0x65,
-	0x70, 0x6f, 0x72, 0x74, 0x41, 0x63, 0x74, 0x6f, 0x72, 0x54, 0x79, 0x70, 0x65, 0x73, 0x52, 0x65,
-	0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x27, 0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e, 0x70, 0x72, 0x6f,
+	0x62, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x5b, 0x0a, 0x06, 0x47,
+	0x65, 0x74, 0x4a, 0x6f, 0x62, 0x12, 0x26, 0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e, 0x70, 0x72, 0x6f,
 	0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e, 0x76, 0x31, 0x2e,
-	0x50, 0x6c, 0x61, 0x63, 0x65, 0x6d, 0x65, 0x6e, 0x74, 0x4f, 0x72, 0x64, 0x65, 0x72, 0x22, 0x00,
-	0x28, 0x01, 0x30, 0x01, 0x42, 0x37, 0x5a, 0x35, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63,
-	0x6f, 0x6d, 0x2f, 0x64, 0x61, 0x70, 0x72, 0x2f, 0x64, 0x61, 0x70, 0x72, 0x2f, 0x70, 0x6b, 0x67,
-	0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72,
-	0x2f, 0x76, 0x31, 0x3b, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x62, 0x06, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x47, 0x65, 0x74, 0x4a, 0x6f, 0x62, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x27, 0x2e,
+	0x64, 0x61, 0x70, 0x72, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64,
+	0x75, 0x6c, 0x65, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x65, 0x74, 0x4a, 0x6f, 0x62, 0x52, 0x65,
+	0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x64, 0x0a, 0x09, 0x44, 0x65, 0x6c, 0x65,
+	0x74, 0x65, 0x4a, 0x6f, 0x62, 0x12, 0x29, 0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e, 0x70, 0x72, 0x6f,
+	0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e, 0x76, 0x31, 0x2e,
+	0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x4a, 0x6f, 0x62, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
+	0x1a, 0x2a, 0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63,
+	0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x44, 0x65, 0x6c, 0x65, 0x74,
+	0x65, 0x4a, 0x6f, 0x62, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x68,
+	0x0a, 0x09, 0x57, 0x61, 0x74, 0x63, 0x68, 0x4a, 0x6f, 0x62, 0x73, 0x12, 0x29, 0x2e, 0x64, 0x61,
+	0x70, 0x72, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c,
+	0x65, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x57, 0x61, 0x74, 0x63, 0x68, 0x4a, 0x6f, 0x62, 0x73, 0x52,
+	0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x2a, 0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e, 0x70, 0x72,
+	0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e, 0x76, 0x31,
+	0x2e, 0x57, 0x61, 0x74, 0x63, 0x68, 0x4a, 0x6f, 0x62, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e,
+	0x73, 0x65, 0x22, 0x00, 0x28, 0x01, 0x30, 0x01, 0x12, 0x61, 0x0a, 0x08, 0x4c, 0x69, 0x73, 0x74,
+	0x4a, 0x6f, 0x62, 0x73, 0x12, 0x28, 0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e, 0x70, 0x72, 0x6f, 0x74,
+	0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x4c,
+	0x69, 0x73, 0x74, 0x4a, 0x6f, 0x62, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x29,
+	0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65,
+	0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x4c, 0x69, 0x73, 0x74, 0x4a, 0x6f, 0x62,
+	0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x69, 0x0a, 0x0a, 0x57,
+	0x61, 0x74, 0x63, 0x68, 0x48, 0x6f, 0x73, 0x74, 0x73, 0x12, 0x2a, 0x2e, 0x64, 0x61, 0x70, 0x72,
+	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72,
+	0x2e, 0x76, 0x31, 0x2e, 0x57, 0x61, 0x74, 0x63, 0x68, 0x48, 0x6f, 0x73, 0x74, 0x73, 0x52, 0x65,
+	0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x2b, 0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e, 0x70, 0x72, 0x6f,
+	0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e, 0x76, 0x31, 0x2e,
+	0x57, 0x61, 0x74, 0x63, 0x68, 0x48, 0x6f, 0x73, 0x74, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e,
+	0x73, 0x65, 0x22, 0x00, 0x30, 0x01, 0x12, 0x79, 0x0a, 0x10, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65,
+	0x42, 0x79, 0x4d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0x12, 0x30, 0x2e, 0x64, 0x61, 0x70,
+	0x72, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65,
+	0x72, 0x2e, 0x76, 0x31, 0x2e, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x42, 0x79, 0x4d, 0x65, 0x74,
+	0x61, 0x64, 0x61, 0x74, 0x61, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x31, 0x2e, 0x64,
+	0x61, 0x70, 0x72, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75,
+	0x6c, 0x65, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x42, 0x79, 0x4d,
+	0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22,
+	0x00, 0x12, 0x7f, 0x0a, 0x12, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x42, 0x79, 0x4e, 0x61, 0x6d,
+	0x65, 0x50, 0x72, 0x65, 0x66, 0x69, 0x78, 0x12, 0x32, 0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e, 0x70,
+	0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e, 0x76,
+	0x31, 0x2e, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x42, 0x79, 0x4e, 0x61, 0x6d, 0x65, 0x50, 0x72,
+	0x65, 0x66, 0x69, 0x78, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x33, 0x2e, 0x64, 0x61,
+	0x70, 0x72, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c,
+	0x65, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x42, 0x79, 0x4e, 0x61,
+	0x6d, 0x65, 0x50, 0x72, 0x65, 0x66, 0x69, 0x78, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65,
+	0x22, 0x00, 0x12, 0x73, 0x0a, 0x10, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x41, 0x63, 0x74, 0x6f,
+	0x72, 0x54, 0x79, 0x70, 0x65, 0x73, 0x12, 0x30, 0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e, 0x70, 0x72,
+	0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e, 0x76, 0x31,
+	0x2e, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x41, 0x63, 0x74, 0x6f, 0x72, 0x54, 0x79, 0x70, 0x65,
+	0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x27, 0x2e, 0x64, 0x61, 0x70, 0x72, 0x2e,
+	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72, 0x2e,
+	0x76, 0x31, 0x2e, 0x50, 0x6c, 0x61, 0x63, 0x65, 0x6d, 0x65, 0x6e, 0x74, 0x4f, 0x72, 0x64, 0x65,
+	0x72, 0x22, 0x00, 0x28, 0x01, 0x30, 0x01, 0x42, 0x37, 0x5a, 0x35, 0x67, 0x69, 0x74, 0x68, 0x75,
+	0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x64, 0x61, 0x70, 0x72, 0x2f, 0x64, 0x61, 0x70, 0x72, 0x2f,
+	0x70, 0x6b, 0x67, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75,
+	0x6c, 0x65, 0x72, 0x2f, 0x76, 0x31, 0x3b, 0x73, 0x63, 0x68, 0x65, 0x64, 0x75, 0x6c, 0x65, 0x72,
+	0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -2124,7 +2230,7 @@ func file_dapr_proto_scheduler_v1_scheduler_proto_rawDescGZIP() []byte {
 }
 
 var file_dapr_proto_scheduler_v1_scheduler_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_dapr_proto_scheduler_v1_scheduler_proto_goTypes = []interface{}{
 	(JobTargetType)(0),                 // 0: dapr.proto.scheduler.v1.JobTargetType
 	(WatchJobsRequestResultStatus)(0),  // 1: dapr.proto.scheduler.v1.WatchJobsRequestResultStatus
@@ -2135,80 +2241,82 @@ var file_dapr_proto_scheduler_v1_scheduler_proto_goTypes = []interface{}{
 	(*JobMetadata)(nil),                // 6: dapr.proto.scheduler.v1.JobMetadata
 	(*WatchJobsRequest)(nil),           // 7: dapr.proto.scheduler.v1.WatchJobsRequest
 	(*WatchJobsRequestInitial)(nil),    // 8: dapr.proto.scheduler.v1.WatchJobsRequestInitial
-	(*ConcurrencyLimit)(nil),           // 9: dapr.proto.scheduler.v1.ConcurrencyLimit
-	(*ConcurrencyLimitActor)(nil),      // 10: dapr.proto.scheduler.v1.ConcurrencyLimitActor
-	(*WatchJobsRequestResult)(nil),     // 11: dapr.proto.scheduler.v1.WatchJobsRequestResult
-	(*WatchJobsResponse)(nil),          // 12: dapr.proto.scheduler.v1.WatchJobsResponse
-	(*ScheduleJobRequest)(nil),         // 13: dapr.proto.scheduler.v1.ScheduleJobRequest
-	(*ScheduleJobResponse)(nil),        // 14: dapr.proto.scheduler.v1.ScheduleJobResponse
-	(*GetJobRequest)(nil),              // 15: dapr.proto.scheduler.v1.GetJobRequest
-	(*GetJobResponse)(nil),             // 16: dapr.proto.scheduler.v1.GetJobResponse
-	(*DeleteJobRequest)(nil),           // 17: dapr.proto.scheduler.v1.DeleteJobRequest
-	(*DeleteJobResponse)(nil),          // 18: dapr.proto.scheduler.v1.DeleteJobResponse
-	(*NamedJob)(nil),                   // 19: dapr.proto.scheduler.v1.NamedJob
-	(*ListJobsRequest)(nil),            // 20: dapr.proto.scheduler.v1.ListJobsRequest
-	(*ListJobsResponse)(nil),           // 21: dapr.proto.scheduler.v1.ListJobsResponse
-	(*WatchHostsRequest)(nil),          // 22: dapr.proto.scheduler.v1.WatchHostsRequest
-	(*WatchHostsResponse)(nil),         // 23: dapr.proto.scheduler.v1.WatchHostsResponse
-	(*Host)(nil),                       // 24: dapr.proto.scheduler.v1.Host
-	(*DeleteByMetadataRequest)(nil),    // 25: dapr.proto.scheduler.v1.DeleteByMetadataRequest
-	(*DeleteByMetadataResponse)(nil),   // 26: dapr.proto.scheduler.v1.DeleteByMetadataResponse
-	(*DeleteByNamePrefixRequest)(nil),  // 27: dapr.proto.scheduler.v1.DeleteByNamePrefixRequest
-	(*DeleteByNamePrefixResponse)(nil), // 28: dapr.proto.scheduler.v1.DeleteByNamePrefixResponse
-	(*anypb.Any)(nil),                  // 29: google.protobuf.Any
-	(*v1.JobFailurePolicy)(nil),        // 30: dapr.proto.common.v1.JobFailurePolicy
-	(*ReportActorTypesRequest)(nil),    // 31: dapr.proto.scheduler.v1.ReportActorTypesRequest
-	(*PlacementOrder)(nil),             // 32: dapr.proto.scheduler.v1.PlacementOrder
+	(*WatchJobsDeadLetter)(nil),        // 9: dapr.proto.scheduler.v1.WatchJobsDeadLetter
+	(*ConcurrencyLimit)(nil),           // 10: dapr.proto.scheduler.v1.ConcurrencyLimit
+	(*ConcurrencyLimitActor)(nil),      // 11: dapr.proto.scheduler.v1.ConcurrencyLimitActor
+	(*WatchJobsRequestResult)(nil),     // 12: dapr.proto.scheduler.v1.WatchJobsRequestResult
+	(*WatchJobsResponse)(nil),          // 13: dapr.proto.scheduler.v1.WatchJobsResponse
+	(*ScheduleJobRequest)(nil),         // 14: dapr.proto.scheduler.v1.ScheduleJobRequest
+	(*ScheduleJobResponse)(nil),        // 15: dapr.proto.scheduler.v1.ScheduleJobResponse
+	(*GetJobRequest)(nil),              // 16: dapr.proto.scheduler.v1.GetJobRequest
+	(*GetJobResponse)(nil),             // 17: dapr.proto.scheduler.v1.GetJobResponse
+	(*DeleteJobRequest)(nil),           // 18: dapr.proto.scheduler.v1.DeleteJobRequest
+	(*DeleteJobResponse)(nil),          // 19: dapr.proto.scheduler.v1.DeleteJobResponse
+	(*NamedJob)(nil),                   // 20: dapr.proto.scheduler.v1.NamedJob
+	(*ListJobsRequest)(nil),            // 21: dapr.proto.scheduler.v1.ListJobsRequest
+	(*ListJobsResponse)(nil),           // 22: dapr.proto.scheduler.v1.ListJobsResponse
+	(*WatchHostsRequest)(nil),          // 23: dapr.proto.scheduler.v1.WatchHostsRequest
+	(*WatchHostsResponse)(nil),         // 24: dapr.proto.scheduler.v1.WatchHostsResponse
+	(*Host)(nil),                       // 25: dapr.proto.scheduler.v1.Host
+	(*DeleteByMetadataRequest)(nil),    // 26: dapr.proto.scheduler.v1.DeleteByMetadataRequest
+	(*DeleteByMetadataResponse)(nil),   // 27: dapr.proto.scheduler.v1.DeleteByMetadataResponse
+	(*DeleteByNamePrefixRequest)(nil),  // 28: dapr.proto.scheduler.v1.DeleteByNamePrefixRequest
+	(*DeleteByNamePrefixResponse)(nil), // 29: dapr.proto.scheduler.v1.DeleteByNamePrefixResponse
+	(*anypb.Any)(nil),                  // 30: google.protobuf.Any
+	(*v1.JobFailurePolicy)(nil),        // 31: dapr.proto.common.v1.JobFailurePolicy
+	(*ReportActorTypesRequest)(nil),    // 32: dapr.proto.scheduler.v1.ReportActorTypesRequest
+	(*PlacementOrder)(nil),             // 33: dapr.proto.scheduler.v1.PlacementOrder
 }
 var file_dapr_proto_scheduler_v1_scheduler_proto_depIdxs = []int32{
-	29, // 0: dapr.proto.scheduler.v1.Job.data:type_name -> google.protobuf.Any
-	30, // 1: dapr.proto.scheduler.v1.Job.failure_policy:type_name -> dapr.proto.common.v1.JobFailurePolicy
+	30, // 0: dapr.proto.scheduler.v1.Job.data:type_name -> google.protobuf.Any
+	31, // 1: dapr.proto.scheduler.v1.Job.failure_policy:type_name -> dapr.proto.common.v1.JobFailurePolicy
 	3,  // 2: dapr.proto.scheduler.v1.JobTargetMetadata.job:type_name -> dapr.proto.scheduler.v1.TargetJob
 	4,  // 3: dapr.proto.scheduler.v1.JobTargetMetadata.actor:type_name -> dapr.proto.scheduler.v1.TargetActorReminder
 	5,  // 4: dapr.proto.scheduler.v1.JobMetadata.target:type_name -> dapr.proto.scheduler.v1.JobTargetMetadata
 	8,  // 5: dapr.proto.scheduler.v1.WatchJobsRequest.initial:type_name -> dapr.proto.scheduler.v1.WatchJobsRequestInitial
-	11, // 6: dapr.proto.scheduler.v1.WatchJobsRequest.result:type_name -> dapr.proto.scheduler.v1.WatchJobsRequestResult
+	12, // 6: dapr.proto.scheduler.v1.WatchJobsRequest.result:type_name -> dapr.proto.scheduler.v1.WatchJobsRequestResult
 	0,  // 7: dapr.proto.scheduler.v1.WatchJobsRequestInitial.accept_job_types:type_name -> dapr.proto.scheduler.v1.JobTargetType
-	9,  // 8: dapr.proto.scheduler.v1.WatchJobsRequestInitial.concurrency_limits:type_name -> dapr.proto.scheduler.v1.ConcurrencyLimit
-	10, // 9: dapr.proto.scheduler.v1.ConcurrencyLimit.actor:type_name -> dapr.proto.scheduler.v1.ConcurrencyLimitActor
-	1,  // 10: dapr.proto.scheduler.v1.WatchJobsRequestResult.status:type_name -> dapr.proto.scheduler.v1.WatchJobsRequestResultStatus
-	29, // 11: dapr.proto.scheduler.v1.WatchJobsResponse.data:type_name -> google.protobuf.Any
-	6,  // 12: dapr.proto.scheduler.v1.WatchJobsResponse.metadata:type_name -> dapr.proto.scheduler.v1.JobMetadata
-	2,  // 13: dapr.proto.scheduler.v1.ScheduleJobRequest.job:type_name -> dapr.proto.scheduler.v1.Job
-	6,  // 14: dapr.proto.scheduler.v1.ScheduleJobRequest.metadata:type_name -> dapr.proto.scheduler.v1.JobMetadata
-	6,  // 15: dapr.proto.scheduler.v1.GetJobRequest.metadata:type_name -> dapr.proto.scheduler.v1.JobMetadata
-	2,  // 16: dapr.proto.scheduler.v1.GetJobResponse.job:type_name -> dapr.proto.scheduler.v1.Job
-	6,  // 17: dapr.proto.scheduler.v1.DeleteJobRequest.metadata:type_name -> dapr.proto.scheduler.v1.JobMetadata
-	6,  // 18: dapr.proto.scheduler.v1.NamedJob.metadata:type_name -> dapr.proto.scheduler.v1.JobMetadata
-	2,  // 19: dapr.proto.scheduler.v1.NamedJob.job:type_name -> dapr.proto.scheduler.v1.Job
-	6,  // 20: dapr.proto.scheduler.v1.ListJobsRequest.metadata:type_name -> dapr.proto.scheduler.v1.JobMetadata
-	19, // 21: dapr.proto.scheduler.v1.ListJobsResponse.jobs:type_name -> dapr.proto.scheduler.v1.NamedJob
-	24, // 22: dapr.proto.scheduler.v1.WatchHostsResponse.hosts:type_name -> dapr.proto.scheduler.v1.Host
-	6,  // 23: dapr.proto.scheduler.v1.DeleteByMetadataRequest.metadata:type_name -> dapr.proto.scheduler.v1.JobMetadata
-	6,  // 24: dapr.proto.scheduler.v1.DeleteByNamePrefixRequest.metadata:type_name -> dapr.proto.scheduler.v1.JobMetadata
-	13, // 25: dapr.proto.scheduler.v1.Scheduler.ScheduleJob:input_type -> dapr.proto.scheduler.v1.ScheduleJobRequest
-	15, // 26: dapr.proto.scheduler.v1.Scheduler.GetJob:input_type -> dapr.proto.scheduler.v1.GetJobRequest
-	17, // 27: dapr.proto.scheduler.v1.Scheduler.DeleteJob:input_type -> dapr.proto.scheduler.v1.DeleteJobRequest
-	7,  // 28: dapr.proto.scheduler.v1.Scheduler.WatchJobs:input_type -> dapr.proto.scheduler.v1.WatchJobsRequest
-	20, // 29: dapr.proto.scheduler.v1.Scheduler.ListJobs:input_type -> dapr.proto.scheduler.v1.ListJobsRequest
-	22, // 30: dapr.proto.scheduler.v1.Scheduler.WatchHosts:input_type -> dapr.proto.scheduler.v1.WatchHostsRequest
-	25, // 31: dapr.proto.scheduler.v1.Scheduler.DeleteByMetadata:input_type -> dapr.proto.scheduler.v1.DeleteByMetadataRequest
-	27, // 32: dapr.proto.scheduler.v1.Scheduler.DeleteByNamePrefix:input_type -> dapr.proto.scheduler.v1.DeleteByNamePrefixRequest
-	31, // 33: dapr.proto.scheduler.v1.Scheduler.ReportActorTypes:input_type -> dapr.proto.scheduler.v1.ReportActorTypesRequest
-	14, // 34: dapr.proto.scheduler.v1.Scheduler.ScheduleJob:output_type -> dapr.proto.scheduler.v1.ScheduleJobResponse
-	16, // 35: dapr.proto.scheduler.v1.Scheduler.GetJob:output_type -> dapr.proto.scheduler.v1.GetJobResponse
-	18, // 36: dapr.proto.scheduler.v1.Scheduler.DeleteJob:output_type -> dapr.proto.scheduler.v1.DeleteJobResponse
-	12, // 37: dapr.proto.scheduler.v1.Scheduler.WatchJobs:output_type -> dapr.proto.scheduler.v1.WatchJobsResponse
-	21, // 38: dapr.proto.scheduler.v1.Scheduler.ListJobs:output_type -> dapr.proto.scheduler.v1.ListJobsResponse
-	23, // 39: dapr.proto.scheduler.v1.Scheduler.WatchHosts:output_type -> dapr.proto.scheduler.v1.WatchHostsResponse
-	26, // 40: dapr.proto.scheduler.v1.Scheduler.DeleteByMetadata:output_type -> dapr.proto.scheduler.v1.DeleteByMetadataResponse
-	28, // 41: dapr.proto.scheduler.v1.Scheduler.DeleteByNamePrefix:output_type -> dapr.proto.scheduler.v1.DeleteByNamePrefixResponse
-	32, // 42: dapr.proto.scheduler.v1.Scheduler.ReportActorTypes:output_type -> dapr.proto.scheduler.v1.PlacementOrder
-	34, // [34:43] is the sub-list for method output_type
-	25, // [25:34] is the sub-list for method input_type
-	25, // [25:25] is the sub-list for extension type_name
-	25, // [25:25] is the sub-list for extension extendee
-	0,  // [0:25] is the sub-list for field type_name
+	10, // 8: dapr.proto.scheduler.v1.WatchJobsRequestInitial.concurrency_limits:type_name -> dapr.proto.scheduler.v1.ConcurrencyLimit
+	9,  // 9: dapr.proto.scheduler.v1.WatchJobsRequestInitial.dead_letter:type_name -> dapr.proto.scheduler.v1.WatchJobsDeadLetter
+	11, // 10: dapr.proto.scheduler.v1.ConcurrencyLimit.actor:type_name -> dapr.proto.scheduler.v1.ConcurrencyLimitActor
+	1,  // 11: dapr.proto.scheduler.v1.WatchJobsRequestResult.status:type_name -> dapr.proto.scheduler.v1.WatchJobsRequestResultStatus
+	30, // 12: dapr.proto.scheduler.v1.WatchJobsResponse.data:type_name -> google.protobuf.Any
+	6,  // 13: dapr.proto.scheduler.v1.WatchJobsResponse.metadata:type_name -> dapr.proto.scheduler.v1.JobMetadata
+	2,  // 14: dapr.proto.scheduler.v1.ScheduleJobRequest.job:type_name -> dapr.proto.scheduler.v1.Job
+	6,  // 15: dapr.proto.scheduler.v1.ScheduleJobRequest.metadata:type_name -> dapr.proto.scheduler.v1.JobMetadata
+	6,  // 16: dapr.proto.scheduler.v1.GetJobRequest.metadata:type_name -> dapr.proto.scheduler.v1.JobMetadata
+	2,  // 17: dapr.proto.scheduler.v1.GetJobResponse.job:type_name -> dapr.proto.scheduler.v1.Job
+	6,  // 18: dapr.proto.scheduler.v1.DeleteJobRequest.metadata:type_name -> dapr.proto.scheduler.v1.JobMetadata
+	6,  // 19: dapr.proto.scheduler.v1.NamedJob.metadata:type_name -> dapr.proto.scheduler.v1.JobMetadata
+	2,  // 20: dapr.proto.scheduler.v1.NamedJob.job:type_name -> dapr.proto.scheduler.v1.Job
+	6,  // 21: dapr.proto.scheduler.v1.ListJobsRequest.metadata:type_name -> dapr.proto.scheduler.v1.JobMetadata
+	20, // 22: dapr.proto.scheduler.v1.ListJobsResponse.jobs:type_name -> dapr.proto.scheduler.v1.NamedJob
+	25, // 23: dapr.proto.scheduler.v1.WatchHostsResponse.hosts:type_name -> dapr.proto.scheduler.v1.Host
+	6,  // 24: dapr.proto.scheduler.v1.DeleteByMetadataRequest.metadata:type_name -> dapr.proto.scheduler.v1.JobMetadata
+	6,  // 25: dapr.proto.scheduler.v1.DeleteByNamePrefixRequest.metadata:type_name -> dapr.proto.scheduler.v1.JobMetadata
+	14, // 26: dapr.proto.scheduler.v1.Scheduler.ScheduleJob:input_type -> dapr.proto.scheduler.v1.ScheduleJobRequest
+	16, // 27: dapr.proto.scheduler.v1.Scheduler.GetJob:input_type -> dapr.proto.scheduler.v1.GetJobRequest
+	18, // 28: dapr.proto.scheduler.v1.Scheduler.DeleteJob:input_type -> dapr.proto.scheduler.v1.DeleteJobRequest
+	7,  // 29: dapr.proto.scheduler.v1.Scheduler.WatchJobs:input_type -> dapr.proto.scheduler.v1.WatchJobsRequest
+	21, // 30: dapr.proto.scheduler.v1.Scheduler.ListJobs:input_type -> dapr.proto.scheduler.v1.ListJobsRequest
+	23, // 31: dapr.proto.scheduler.v1.Scheduler.WatchHosts:input_type -> dapr.proto.scheduler.v1.WatchHostsRequest
+	26, // 32: dapr.proto.scheduler.v1.Scheduler.DeleteByMetadata:input_type -> dapr.proto.scheduler.v1.DeleteByMetadataRequest
+	28, // 33: dapr.proto.scheduler.v1.Scheduler.DeleteByNamePrefix:input_type -> dapr.proto.scheduler.v1.DeleteByNamePrefixRequest
+	32, // 34: dapr.proto.scheduler.v1.Scheduler.ReportActorTypes:input_type -> dapr.proto.scheduler.v1.ReportActorTypesRequest
+	15, // 35: dapr.proto.scheduler.v1.Scheduler.ScheduleJob:output_type -> dapr.proto.scheduler.v1.ScheduleJobResponse
+	17, // 36: dapr.proto.scheduler.v1.Scheduler.GetJob:output_type -> dapr.proto.scheduler.v1.GetJobResponse
+	19, // 37: dapr.proto.scheduler.v1.Scheduler.DeleteJob:output_type -> dapr.proto.scheduler.v1.DeleteJobResponse
+	13, // 38: dapr.proto.scheduler.v1.Scheduler.WatchJobs:output_type -> dapr.proto.scheduler.v1.WatchJobsResponse
+	22, // 39: dapr.proto.scheduler.v1.Scheduler.ListJobs:output_type -> dapr.proto.scheduler.v1.ListJobsResponse
+	24, // 40: dapr.proto.scheduler.v1.Scheduler.WatchHosts:output_type -> dapr.proto.scheduler.v1.WatchHostsResponse
+	27, // 41: dapr.proto.scheduler.v1.Scheduler.DeleteByMetadata:output_type -> dapr.proto.scheduler.v1.DeleteByMetadataResponse
+	29, // 42: dapr.proto.scheduler.v1.Scheduler.DeleteByNamePrefix:output_type -> dapr.proto.scheduler.v1.DeleteByNamePrefixResponse
+	33, // 43: dapr.proto.scheduler.v1.Scheduler.ReportActorTypes:output_type -> dapr.proto.scheduler.v1.PlacementOrder
+	35, // [35:44] is the sub-list for method output_type
+	26, // [26:35] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_dapr_proto_scheduler_v1_scheduler_proto_init() }
@@ -2303,7 +2411,7 @@ func file_dapr_proto_scheduler_v1_scheduler_proto_init() {
 			}
 		}
 		file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[7].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ConcurrencyLimit); i {
+			switch v := v.(*WatchJobsDeadLetter); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2315,7 +2423,7 @@ func file_dapr_proto_scheduler_v1_scheduler_proto_init() {
 			}
 		}
 		file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[8].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ConcurrencyLimitActor); i {
+			switch v := v.(*ConcurrencyLimit); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2327,7 +2435,7 @@ func file_dapr_proto_scheduler_v1_scheduler_proto_init() {
 			}
 		}
 		file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[9].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*WatchJobsRequestResult); i {
+			switch v := v.(*ConcurrencyLimitActor); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2339,7 +2447,7 @@ func file_dapr_proto_scheduler_v1_scheduler_proto_init() {
 			}
 		}
 		file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[10].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*WatchJobsResponse); i {
+			switch v := v.(*WatchJobsRequestResult); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2351,7 +2459,7 @@ func file_dapr_proto_scheduler_v1_scheduler_proto_init() {
 			}
 		}
 		file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[11].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ScheduleJobRequest); i {
+			switch v := v.(*WatchJobsResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2363,7 +2471,7 @@ func file_dapr_proto_scheduler_v1_scheduler_proto_init() {
 			}
 		}
 		file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[12].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ScheduleJobResponse); i {
+			switch v := v.(*ScheduleJobRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2375,7 +2483,7 @@ func file_dapr_proto_scheduler_v1_scheduler_proto_init() {
 			}
 		}
 		file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[13].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetJobRequest); i {
+			switch v := v.(*ScheduleJobResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2387,7 +2495,7 @@ func file_dapr_proto_scheduler_v1_scheduler_proto_init() {
 			}
 		}
 		file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[14].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetJobResponse); i {
+			switch v := v.(*GetJobRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2399,7 +2507,7 @@ func file_dapr_proto_scheduler_v1_scheduler_proto_init() {
 			}
 		}
 		file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[15].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DeleteJobRequest); i {
+			switch v := v.(*GetJobResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2411,7 +2519,7 @@ func file_dapr_proto_scheduler_v1_scheduler_proto_init() {
 			}
 		}
 		file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[16].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DeleteJobResponse); i {
+			switch v := v.(*DeleteJobRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2423,7 +2531,7 @@ func file_dapr_proto_scheduler_v1_scheduler_proto_init() {
 			}
 		}
 		file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[17].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*NamedJob); i {
+			switch v := v.(*DeleteJobResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2435,7 +2543,7 @@ func file_dapr_proto_scheduler_v1_scheduler_proto_init() {
 			}
 		}
 		file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[18].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ListJobsRequest); i {
+			switch v := v.(*NamedJob); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2447,7 +2555,7 @@ func file_dapr_proto_scheduler_v1_scheduler_proto_init() {
 			}
 		}
 		file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[19].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ListJobsResponse); i {
+			switch v := v.(*ListJobsRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2459,7 +2567,7 @@ func file_dapr_proto_scheduler_v1_scheduler_proto_init() {
 			}
 		}
 		file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[20].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*WatchHostsRequest); i {
+			switch v := v.(*ListJobsResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2471,7 +2579,7 @@ func file_dapr_proto_scheduler_v1_scheduler_proto_init() {
 			}
 		}
 		file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[21].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*WatchHostsResponse); i {
+			switch v := v.(*WatchHostsRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2483,7 +2591,7 @@ func file_dapr_proto_scheduler_v1_scheduler_proto_init() {
 			}
 		}
 		file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[22].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Host); i {
+			switch v := v.(*WatchHostsResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2495,7 +2603,7 @@ func file_dapr_proto_scheduler_v1_scheduler_proto_init() {
 			}
 		}
 		file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[23].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DeleteByMetadataRequest); i {
+			switch v := v.(*Host); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2507,7 +2615,7 @@ func file_dapr_proto_scheduler_v1_scheduler_proto_init() {
 			}
 		}
 		file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[24].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DeleteByMetadataResponse); i {
+			switch v := v.(*DeleteByMetadataRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2519,7 +2627,7 @@ func file_dapr_proto_scheduler_v1_scheduler_proto_init() {
 			}
 		}
 		file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[25].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DeleteByNamePrefixRequest); i {
+			switch v := v.(*DeleteByMetadataResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2531,6 +2639,18 @@ func file_dapr_proto_scheduler_v1_scheduler_proto_init() {
 			}
 		}
 		file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[26].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*DeleteByNamePrefixRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[27].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*DeleteByNamePrefixResponse); i {
 			case 0:
 				return &v.state
@@ -2554,17 +2674,17 @@ func file_dapr_proto_scheduler_v1_scheduler_proto_init() {
 		(*WatchJobsRequest_Result)(nil),
 	}
 	file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[6].OneofWrappers = []interface{}{}
-	file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[7].OneofWrappers = []interface{}{
+	file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[8].OneofWrappers = []interface{}{
 		(*ConcurrencyLimit_Actor)(nil),
 	}
-	file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[23].OneofWrappers = []interface{}{}
+	file_dapr_proto_scheduler_v1_scheduler_proto_msgTypes[24].OneofWrappers = []interface{}{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_dapr_proto_scheduler_v1_scheduler_proto_rawDesc,
 			NumEnums:      2,
-			NumMessages:   27,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

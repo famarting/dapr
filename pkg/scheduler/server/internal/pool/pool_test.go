@@ -21,6 +21,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+
+	schedulerv1pb "github.com/dapr/dapr/pkg/proto/scheduler/v1"
+	"github.com/dapr/dapr/pkg/scheduler/server/internal/pool/loops"
+	loopfake "github.com/dapr/kit/events/loop/fake"
 )
 
 // TestTrackIncapable covers the capability gate's accounting: the count of
@@ -169,4 +173,40 @@ func TestTrackAddresses(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		return len(p.PlacementAddresses()) == 0 && calls.Load() == 6
 	}, time.Second*5, time.Millisecond)
+}
+
+type fakeWatchJobsServer struct {
+	schedulerv1pb.Scheduler_WatchJobsServer
+	ctx context.Context
+}
+
+func (f *fakeWatchJobsServer) Context() context.Context { return f.ctx }
+
+// TestAddConnectionDeadLetter covers that a dead-letter consumer, which is not
+// a sidecar, does not count towards the placement capability gate.
+func TestAddConnectionDeadLetter(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int64
+	p := New(Options{
+		OnSchedulerPlacementCapabilityChange: func() { calls.Add(1) },
+		OnPlacementAddressesChange:           func(bool) { calls.Add(1) },
+	})
+	p.nsLoop = loopfake.New[loops.EventNS]()
+	close(p.readyCh)
+
+	p.AddConnection(&schedulerv1pb.WatchJobsRequestInitial{
+		AppId:      "app1",
+		Namespace:  "ns",
+		DeadLetter: &schedulerv1pb.WatchJobsDeadLetter{AppIds: []string{"*"}},
+	}, &fakeWatchJobsServer{ctx: t.Context()})
+	assert.False(t, p.HasSchedulerPlacementIncapableSidecars())
+	assert.Equal(t, int64(0), calls.Load())
+
+	p.AddConnection(&schedulerv1pb.WatchJobsRequestInitial{
+		AppId:     "app1",
+		Namespace: "ns",
+	}, &fakeWatchJobsServer{ctx: t.Context()})
+	assert.True(t, p.HasSchedulerPlacementIncapableSidecars())
+	assert.Equal(t, int64(1), calls.Load())
 }

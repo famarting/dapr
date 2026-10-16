@@ -53,6 +53,8 @@ type options struct {
 
 	overrideBroadcastHostPort *string
 
+	deadLetterAppIDs []string
+
 	placementEnabled                   *bool
 	placementDisseminateTimeout        *time.Duration
 	placementDisseminateCoalesceWindow *time.Duration
@@ -86,6 +88,14 @@ func WithPlacementDisseminateTimeout(timeout time.Duration) Option {
 func WithPlacementDisseminateCoalesceWindow(window time.Duration) Option {
 	return func(o *options) {
 		o.placementDisseminateCoalesceWindow = &window
+	}
+}
+
+// WithDeadLetterAppIDs allows the App IDs to watch jobs as a dead-letter
+// consumer (--dead-letter-app-ids).
+func WithDeadLetterAppIDs(appIDs ...string) Option {
+	return func(o *options) {
+		o.deadLetterAppIDs = appIDs
 	}
 }
 

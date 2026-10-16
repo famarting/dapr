@@ -29,6 +29,14 @@ func handleAdd(ctx context.Context, cron api.Interface, add *schedulerv1pb.Watch
 	reqNamespace := add.GetNamespace()
 	reqAppID := add.GetAppId()
 
+	// A dead-letter stream serves no target, so it registers no deliverable
+	// prefixes: doing so would stop undeliverable jobs from waiting for a
+	// host, and release waiting jobs to the dead-letter stream instead.
+	if dl := add.GetDeadLetter(); dl != nil {
+		log.Infof("Dead-letter consumer connected: %s/%s (actorTypes=%v) (appIDs=%v).", reqNamespace, reqAppID, dl.GetActorTypes(), dl.GetAppIds())
+		return func(error) {}, nil
+	}
+
 	ts := add.GetAcceptJobTypes()
 	if len(ts) == 0 || slices.Contains(ts, schedulerv1pb.JobTargetType_JOB_TARGET_TYPE_JOB) {
 		prefixes = append(prefixes, "app||"+reqNamespace+"||"+reqAppID+"||")

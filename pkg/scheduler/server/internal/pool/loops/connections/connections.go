@@ -73,6 +73,12 @@ type connections struct {
 	concurrencyGates map[string]*concurrencyGate
 	streamGateKeys   map[uint64][]string
 	wg               sync.WaitGroup
+
+	// deadLetters are the dead-letter streams, which receive the triggers
+	// matching their filter that no other stream serves. nextDeadLetter
+	// round robins across them.
+	deadLetters    []*deadLetter
+	nextDeadLetter uint64
 }
 
 func New(opts Options) loop.Interface[loops.EventConn] {
@@ -144,6 +150,11 @@ func (c *connections) handleAdd(ctx context.Context, add *loops.ConnAdd) error {
 	c.wg.Go(func() {
 		_ = streamLoop.Run(ctx)
 	})
+
+	if filter := add.Request.GetDeadLetter(); filter != nil {
+		c.streams[streamIDx] = c.addDeadLetter(streamLoop, filter)
+		return nil
+	}
 
 	var appID *string
 	ts := add.Request.GetAcceptJobTypes()
@@ -234,7 +245,7 @@ func (c *connections) releaseGates(keys []string) {
 func (c *connections) handleTriggerRequest(req *loops.TriggerRequest) {
 	streamLoop, ok := c.getStreamLoop(req.Job.GetMetadata())
 	if !ok {
-		req.ResultFn(api.TriggerResponseResult_UNDELIVERABLE)
+		c.undeliverable(req)
 		return
 	}
 
@@ -364,14 +375,14 @@ func (c *connections) drainPending(key string, gate *concurrencyGate) {
 
 // tryDispatchPending attempts to dispatch a single pending trigger. Returns
 // dispatched=true iff the trigger was handed to a stream loop, and
-// consumed=true when the caller no longer owns the request (dispatched, or
-// resolved undeliverable). On gate acquisition failure the request stays with
-// the caller to requeue at its original position, and partially-acquired
-// gates are released via defer.
+// consumed=true when the caller no longer owns the request (dispatched,
+// handed to a dead-letter stream, or resolved undeliverable). On gate
+// acquisition failure the request stays with the caller to requeue at its
+// original position, and partially-acquired gates are released via defer.
 func (c *connections) tryDispatchPending(next *loops.TriggerRequest) (dispatched, consumed bool) {
 	streamLoop, ok := c.getStreamLoop(next.Job.GetMetadata())
 	if !ok {
-		next.ResultFn(api.TriggerResponseResult_UNDELIVERABLE)
+		c.undeliverable(next)
 		return false, true
 	}
 
@@ -430,6 +441,7 @@ func (c *connections) handleShutdown() {
 	}
 
 	clear(c.streams)
+	c.deadLetters = nil
 
 	for _, gate := range c.concurrencyGates {
 		for req := gate.dequeue(); req != nil; req = gate.dequeue() {

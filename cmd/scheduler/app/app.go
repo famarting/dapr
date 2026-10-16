@@ -151,6 +151,8 @@ func Run() {
 
 					Workers: opts.Workers,
 
+					DeadLetterAppIDs: opts.DeadLetterAppIDs,
+
 					PlacementEnabled:                   opts.PlacementEnabled,
 					PlacementDisseminateTimeout:        opts.PlacementDisseminateTimeout,
 					PlacementDisseminateCoalesceWindow: opts.PlacementDisseminateCoalesceWindow,

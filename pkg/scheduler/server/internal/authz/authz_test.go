@@ -97,14 +97,14 @@ func Test_Metadata(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			a := New(Options{fake.New().WithMTLSEnabled(true)})
+			a := New(Options{Security: fake.New().WithMTLSEnabled(true)})
 			err := a.Metadata(test.ctx, test.meta)
 			assert.Equal(t, test.expCode != nil, err != nil, "%v %v", test.expCode, err)
 			if test.expCode != nil {
 				assert.Equal(t, *test.expCode, status.Code(err))
 			}
 
-			a = New(Options{fake.New().WithMTLSEnabled(false)})
+			a = New(Options{Security: fake.New().WithMTLSEnabled(false)})
 			err = a.Metadata(test.ctx, test.meta)
 			assert.Equal(t, test.nonMTlSCode != nil, err != nil, "%v %v", test.nonMTlSCode, err)
 			if test.nonMTlSCode != nil {
@@ -183,18 +183,77 @@ func Test_Initial(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			a := New(Options{fake.New().WithMTLSEnabled(true)})
+			a := New(Options{Security: fake.New().WithMTLSEnabled(true)})
 			err := a.WatchInitial(test.ctx, test.initial)
 			assert.Equal(t, test.expCode != nil, err != nil, "%v %v", test.expCode, err)
 			if test.expCode != nil {
 				assert.Equal(t, *test.expCode, status.Code(err))
 			}
 
-			a = New(Options{fake.New().WithMTLSEnabled(false)})
+			a = New(Options{Security: fake.New().WithMTLSEnabled(false)})
 			err = a.WatchInitial(test.ctx, test.initial)
 			assert.Equal(t, test.nonMTlSCode != nil, err != nil, "%v %v", test.nonMTlSCode, err)
 			if test.nonMTlSCode != nil {
 				assert.Equal(t, *test.nonMTlSCode, status.Code(err))
+			}
+		})
+	}
+}
+
+func Test_InitialDeadLetter(t *testing.T) {
+	appID := spiffeid.RequireFromString("spiffe://example.org/ns/ns1/app1")
+	serverID := spiffeid.RequireFromString("spiffe://example.org/ns/dapr-system/dapr-scheduler")
+	pki := test.GenPKI(t, test.PKIOptions{LeafID: serverID, ClientID: appID})
+
+	deadLetter := &schedulerv1pb.WatchJobsDeadLetter{ActorTypes: []string{"dapr.internal.ns1.*.workflow"}}
+
+	tests := map[string]struct {
+		allowed     []string
+		namespace   string
+		expCode     *codes.Code
+		nonMTlSCode *codes.Code
+	}{
+		"allowed app ID in its own namespace should pass": {
+			allowed:   []string{"other", "app1"},
+			namespace: "ns1",
+		},
+		"allowed app ID in another namespace should error": {
+			allowed:     []string{"app1"},
+			namespace:   "ns2",
+			expCode:     ptr.Of(codes.PermissionDenied),
+			nonMTlSCode: nil,
+		},
+		"app ID not allowed should error": {
+			allowed:     []string{"other"},
+			namespace:   "ns1",
+			expCode:     ptr.Of(codes.PermissionDenied),
+			nonMTlSCode: ptr.Of(codes.PermissionDenied),
+		},
+		"no allowed app IDs should error": {
+			namespace:   "ns1",
+			expCode:     ptr.Of(codes.PermissionDenied),
+			nonMTlSCode: ptr.Of(codes.PermissionDenied),
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			initial := &schedulerv1pb.WatchJobsRequestInitial{
+				AppId:      "app1",
+				Namespace:  test.namespace,
+				DeadLetter: deadLetter,
+			}
+
+			for mtls, expCode := range map[bool]*codes.Code{true: test.expCode, false: test.nonMTlSCode} {
+				a := New(Options{
+					Security:         fake.New().WithMTLSEnabled(mtls),
+					DeadLetterAppIDs: test.allowed,
+				})
+				err := a.WatchInitial(pki.ClientGRPCCtx(t), initial)
+				assert.Equal(t, expCode != nil, err != nil, "mtls=%t %v %v", mtls, expCode, err)
+				if expCode != nil {
+					assert.Equal(t, *expCode, status.Code(err))
+				}
 			}
 		})
 	}
@@ -308,7 +367,7 @@ func Test_Job(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			for _, mtls := range []bool{true, false} {
-				a := New(Options{fake.New().WithMTLSEnabled(mtls)})
+				a := New(Options{Security: fake.New().WithMTLSEnabled(mtls)})
 				err := a.Job(pki.ClientGRPCCtx(t), test.req)
 				assert.Equal(t, test.expCode != nil, err != nil, "mtls=%t %v %v", mtls, test.expCode, err)
 				if test.expCode != nil {
@@ -319,7 +378,7 @@ func Test_Job(t *testing.T) {
 	}
 
 	t.Run("metadata only requests never get the activity result exemption", func(t *testing.T) {
-		a := New(Options{fake.New().WithMTLSEnabled(true)})
+		a := New(Options{Security: fake.New().WithMTLSEnabled(true)})
 		err := a.Metadata(pki.ClientGRPCCtx(t), actorMeta("dapr.internal.ns1.app2.workflow"))
 		assert.Equal(t, codes.PermissionDenied, status.Code(err))
 	})

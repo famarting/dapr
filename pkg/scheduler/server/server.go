@@ -66,6 +66,10 @@ type Options struct {
 
 	Workers uint32
 
+	// DeadLetterAppIDs are the App IDs allowed to subscribe to WatchJobs as a
+	// dead-letter consumer.
+	DeadLetterAppIDs []string
+
 	Backend       *string
 	BackendConfig any
 
@@ -221,7 +225,8 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		etcd:          etcdServer,
 		handoff:       hoff,
 		serializer: serialize.New(serialize.Options{
-			Security: opts.Security,
+			Security:         opts.Security,
+			DeadLetterAppIDs: opts.DeadLetterAppIDs,
 		}),
 		closeCh:     make(chan struct{}),
 		hzAPIServer: opts.Healthz.AddTarget("scheduler-server"),

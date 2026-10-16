@@ -19,6 +19,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	schedulerv1pb "github.com/dapr/dapr/pkg/proto/scheduler/v1"
 	"github.com/dapr/dapr/pkg/security/fake"
@@ -168,4 +170,81 @@ func Test_KeyFromMetadata(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, strings.HasPrefix(internal, prefix), "an ID prefix on the exact type still matches")
 	})
+}
+
+func Test_validateDeadLetter(t *testing.T) {
+	t.Parallel()
+
+	deadLetter := func() *schedulerv1pb.WatchJobsDeadLetter {
+		return &schedulerv1pb.WatchJobsDeadLetter{ActorTypes: []string{"dapr.internal.ns.*.workflow"}}
+	}
+
+	tests := map[string]struct {
+		initial *schedulerv1pb.WatchJobsRequestInitial
+		expErr  bool
+	}{
+		"not a dead-letter stream": {
+			initial: &schedulerv1pb.WatchJobsRequestInitial{ActorTypes: []string{"a"}},
+		},
+		"actor types filter": {
+			initial: &schedulerv1pb.WatchJobsRequestInitial{DeadLetter: deadLetter()},
+		},
+		"app IDs filter": {
+			initial: &schedulerv1pb.WatchJobsRequestInitial{
+				DeadLetter: &schedulerv1pb.WatchJobsDeadLetter{AppIds: []string{"*"}},
+			},
+		},
+		"empty filter": {
+			initial: &schedulerv1pb.WatchJobsRequestInitial{DeadLetter: new(schedulerv1pb.WatchJobsDeadLetter)},
+			expErr:  true,
+		},
+		"empty entry": {
+			initial: &schedulerv1pb.WatchJobsRequestInitial{
+				DeadLetter: &schedulerv1pb.WatchJobsDeadLetter{ActorTypes: []string{"a", ""}},
+			},
+			expErr: true,
+		},
+		"declares actor types": {
+			initial: &schedulerv1pb.WatchJobsRequestInitial{DeadLetter: deadLetter(), ActorTypes: []string{"a"}},
+			expErr:  true,
+		},
+		"declares accept job types": {
+			initial: &schedulerv1pb.WatchJobsRequestInitial{
+				DeadLetter:     deadLetter(),
+				AcceptJobTypes: []schedulerv1pb.JobTargetType{schedulerv1pb.JobTargetType_JOB_TARGET_TYPE_JOB},
+			},
+			expErr: true,
+		},
+		"declares concurrency limits": {
+			initial: &schedulerv1pb.WatchJobsRequestInitial{
+				DeadLetter:        deadLetter(),
+				ConcurrencyLimits: []*schedulerv1pb.ConcurrencyLimit{{MaxConcurrent: 1}},
+			},
+			expErr: true,
+		},
+		"declares actor address": {
+			initial: &schedulerv1pb.WatchJobsRequestInitial{DeadLetter: deadLetter(), ActorAddress: new("127.0.0.1:1")},
+			expErr:  true,
+		},
+		"declares placement support": {
+			initial: &schedulerv1pb.WatchJobsRequestInitial{DeadLetter: deadLetter(), SupportsSchedulerPlacement: true},
+			expErr:  true,
+		},
+		"declares placement addresses": {
+			initial: &schedulerv1pb.WatchJobsRequestInitial{DeadLetter: deadLetter(), PlacementAddresses: []string{"127.0.0.1:1"}},
+			expErr:  true,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			err := validateDeadLetter(test.initial)
+			if test.expErr {
+				assert.Equal(t, codes.InvalidArgument, status.Code(err), "%v", err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }

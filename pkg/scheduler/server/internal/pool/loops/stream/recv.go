@@ -77,6 +77,15 @@ func (s *stream) recv() error {
 		inf.(func(api.TriggerResponseResult))(api.TriggerResponseResult_SUCCESS)
 	case schedulerv1pb.WatchJobsRequestResultStatus_FAILED:
 		inf.(func(api.TriggerResponseResult))(api.TriggerResponseResult_FAILED)
+	case schedulerv1pb.WatchJobsRequestResultStatus_UNDELIVERABLE:
+		inf.(func(api.TriggerResponseResult))(api.TriggerResponseResult_UNDELIVERABLE)
+		// Only a dead-letter stream may answer undeliverable: a stream
+		// serving the target keeps its prefixes deliverable, so the job
+		// would be retriggered at once rather than wait. Close the stream so
+		// its prefixes are deregistered.
+		if !s.deadLetter {
+			return fmt.Errorf("undeliverable trigger response from non dead-letter stream %s/%s", s.ns, s.appID)
+		}
 	default:
 		return fmt.Errorf("unknown trigger response status: %s", result.GetStatus())
 	}

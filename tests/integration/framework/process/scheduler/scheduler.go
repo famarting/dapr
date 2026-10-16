@@ -185,6 +185,10 @@ func New(t *testing.T, fopts ...Option) *Scheduler {
 		args = append(args, fmt.Sprintf("--workers=%d", *opts.workers))
 	}
 
+	if len(opts.deadLetterAppIDs) > 0 {
+		args = append(args, "--dead-letter-app-ids="+strings.Join(opts.deadLetterAppIDs, ","))
+	}
+
 	if opts.etcdSpaceQuota != nil {
 		args = append(args, "--etcd-space-quota="+*opts.etcdSpaceQuota)
 	}

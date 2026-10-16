@@ -55,6 +55,10 @@ type stream struct {
 	loop    loop.Interface[loops.EventStream]
 	cancel  context.CancelCauseFunc
 
+	// deadLetter is whether this is a dead-letter stream, which may answer
+	// a trigger undeliverable.
+	deadLetter bool
+
 	// closeStream closes the stream exactly once: it cancels the stream
 	// (deregistering its deliverable prefixes and unblocking the WatchJobs
 	// handler) and notifies the namespace loop exactly once. Both the recv
@@ -85,6 +89,7 @@ func New(ctx context.Context, opts Options) (loop.Interface[loops.EventStream], 
 	stream.channel = opts.Add.Channel
 	stream.ns = opts.Add.Request.GetNamespace()
 	stream.appID = opts.Add.Request.GetAppId()
+	stream.deadLetter = opts.Add.Request.GetDeadLetter() != nil
 	stream.triggerIDx = 0
 	// The cron prefix deregistration returned by handleAdd is not idempotent:
 	// a second invocation releases a reference which may belong to a

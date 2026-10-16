@@ -161,6 +161,41 @@ message WatchJobsRequestInitial {
   // the well-known service name still withholds the placement leader
   // advertisement while it runs.
   repeated string placement_addresses = 8;
+
+  // dead_letter, when set, makes this stream a dead-letter consumer instead
+  // of a job target. The scheduler delivers to it the triggers matching the
+  // filter which no other stream in the namespace serves, rather than
+  // answering them undeliverable itself. The subscription is scoped to the
+  // stream's own namespace. A dead-letter stream serves no target of its
+  // own, so actor_types, accept_job_types, concurrency_limits,
+  // actor_address, supports_scheduler_placement and placement_addresses
+  // must be unset. The App ID must be allowed by the scheduler's
+  // --dead-letter-app-ids flag.
+  //
+  // The consumer answers each trigger as normal. UNDELIVERABLE leaves the
+  // job waiting for a target, exactly as if no dead-letter consumer were
+  // connected. SUCCESS and FAILED are authoritative: SUCCESS counts the
+  // trigger as delivered and FAILED applies the job's failure policy, so a
+  // consumer which only observes must answer UNDELIVERABLE.
+  //
+  // Each time a dead-letter stream connects, every scheduler replays to the
+  // dead-letter consumers of the namespace the jobs it holds waiting for a
+  // target which match the filter, so consumers must tolerate a trigger
+  // being delivered more than once.
+  WatchJobsDeadLetter dead_letter = 9;
+}
+
+// WatchJobsDeadLetter selects the undeliverable triggers delivered to a
+// dead-letter stream. A trigger matches when its target matches any entry.
+// Entries are matched in full; '*' matches any run of characters, including
+// none.
+message WatchJobsDeadLetter {
+  // actor_types matches actor reminder triggers by actor type, for example
+  // "dapr.internal.default.*.workflow".
+  repeated string actor_types = 1;
+
+  // app_ids matches job triggers by the App ID of the job.
+  repeated string app_ids = 2;
 }
 
 // ConcurrencyLimit defines a global concurrency limit enforced by the
@@ -203,6 +238,10 @@ enum WatchJobsRequestResultStatus {
 
   // The job was processed with an error.
   FAILED = 1;
+
+  // The job could not be delivered to its target, so it waits until a
+  // stream serving the target connects. Only valid on a dead-letter stream.
+  UNDELIVERABLE = 2;
 }
 
 // WatchJobsRequestResult is the result of a job execution to allow the job to
