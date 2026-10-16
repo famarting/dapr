@@ -53,6 +53,8 @@ type options struct {
 
 	overrideBroadcastHostPort *string
 
+	demandWatcherIDs []string
+
 	placementEnabled                   *bool
 	placementDisseminateTimeout        *time.Duration
 	placementDisseminateCoalesceWindow *time.Duration
@@ -86,6 +88,14 @@ func WithPlacementDisseminateTimeout(timeout time.Duration) Option {
 func WithPlacementDisseminateCoalesceWindow(window time.Duration) Option {
 	return func(o *options) {
 		o.placementDisseminateCoalesceWindow = &window
+	}
+}
+
+// WithDemandWatcherIDs allows the <namespace>/<app ID> identities to call
+// WatchDemand (--demand-watcher-ids).
+func WithDemandWatcherIDs(ids ...string) Option {
+	return func(o *options) {
+		o.demandWatcherIDs = ids
 	}
 }
 
