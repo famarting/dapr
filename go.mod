@@ -551,3 +551,7 @@ replace (
 //
 // Then, run `make modtidy-all` in this repository.
 // This ensures that go.mod and go.sum are up-to-date for each go.mod file.
+
+// TEMPORARY, DO NOT MERGE: use the local go-etcd-cron with the StagingObserver
+// option until it is released.
+replace github.com/diagridio/go-etcd-cron => /Users/fabian/projects/feature-worktrees/go-etcd-cron__staging-hook
